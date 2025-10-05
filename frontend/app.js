@@ -79,6 +79,8 @@
   const outTpl = $('outTpl');
   const btnReloadUsers = $('btnReloadUsers');
   const btnSendTemplate = $('btnSendTemplate');
+  const concUploadBtn = $('btnConcUpload');
+  const concOut = $('outConc');
 
   async function reloadUsers(){
     if (!btnReloadUsers) return;
@@ -143,4 +145,50 @@
 
   if (btnReloadUsers) btnReloadUsers.onclick = reloadUsers;
   if (btnSendTemplate) btnSendTemplate.onclick = sendTemplate;
+  if (concUploadBtn) concUploadBtn.onclick = concUpload;
+
+  async function concUpload(){
+    if (!concOut) return;
+    concOut.textContent = '...';
+
+    const base = normalizeBase($('baseUrl').value);
+    const accountId = ($('concAccountId')?.value||'').trim();
+    const layoutHint = ($('concLayoutHint')?.value||'').trim();
+    const fileId = ($('concFileId')?.value||'').trim();
+    const fileInput = $('concFile');
+    const file = fileInput?.files?.[0];
+
+    if (!accountId){ concOut.textContent = 'Informe o Account ID.'; return; }
+    if (!file){ concOut.textContent = 'Selecione um arquivo (.xlsx, .xls).'; return; }
+
+    try {
+      concUploadBtn.disabled = true;
+      concUploadBtn.textContent = 'Enviando...';
+
+      const form = new FormData();
+      form.append('account_id', accountId);
+      form.append('file', file, file.name);
+      if (fileId) form.append('file_id', fileId);
+      if (layoutHint) form.append('layout_hint', layoutHint);
+
+      const res = await fetch(`${base}/frontend/upload-process/conciliacao`, {
+        method: 'POST',
+        body: form
+      });
+
+      const txt = await res.text();
+      concOut.textContent = `${res.status} ${res.statusText}\n\n${txt}`;
+
+      if (res.ok){
+        // Limpa campos opcionais para facilitar múltiplos envios
+        if (fileInput) fileInput.value = '';
+        if ($('concFileId')) $('concFileId').value = '';
+      }
+    } catch(e){
+      concOut.textContent = `ERR: ${e}`;
+    } finally {
+      concUploadBtn.disabled = false;
+      concUploadBtn.textContent = 'Enviar planilha';
+    }
+  }
 })();

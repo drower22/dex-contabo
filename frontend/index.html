@@ -97,6 +97,23 @@
       <div class="muted">Escolha um usuário (usa users.whatsapp_number_normalized) ou informe um número manualmente.</div>
       <pre id="outTpl"></pre>
     </div>
+
+    <div class="card" id="cardConciliacao">
+      <h2>Upload Conciliação (v3)</h2>
+      <div class="muted">Faça o upload manual de uma planilha de conciliação (layout antigo ou novo). O arquivo será enviado ao Supabase e o processamento será agendado automaticamente.</div>
+      <div class="row">
+        <input id="concAccountId" placeholder="Account ID (obrigatório)" />
+        <input id="concLayoutHint" placeholder="Layout hint (ex: legacy, v3)" />
+      </div>
+      <div class="row">
+        <input id="concFileId" placeholder="File ID (opcional)" />
+        <input id="concFile" type="file" accept=".xlsx,.xls" />
+      </div>
+      <div class="row">
+        <button id="btnConcUpload">Enviar planilha</button>
+      </div>
+      <pre id="outConc"></pre>
+    </div>
   </main>
   <script src="app.js"></script>
 </body>

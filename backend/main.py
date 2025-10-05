@@ -334,7 +334,15 @@ async def frontend_upload_process_conciliacao(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     account_id: str = Form(...),
-    file_id: str = Form(None)
+    file_id: str = Form(None),
+    layout_hint: str | None = Form(
+        None,
+        description=(
+            "Opcional. Use para sinalizar manualmente o layout da planilha "
+            "(ex.: 'legacy', 'v3'). Quando informado, será enviado ao pipeline "
+            "de processamento para tratamento específico."
+        ),
+    )
 ):
     """
     Faz upload do arquivo para o bucket 'conciliacao', cria registro em received_files e agenda processamento.
@@ -347,6 +355,10 @@ async def frontend_upload_process_conciliacao(
             contents = await file.read()
             tmp.write(contents)
             temp_path = tmp.name
+
+        # Indica nos logs qual layout o usuário informou (se houver)
+        if layout_hint:
+            print(f"[DEX][CONCILIACAO] layout_hint recebido: {layout_hint}")
 
         # Reutiliza lógica do endpoint de upload direto para Storage (sem o script), para simplicidade
         bucket_name = "conciliacao"
@@ -374,7 +386,7 @@ async def frontend_upload_process_conciliacao(
             supabase.table('received_files').update({"storage_path": storage_path, "status": "pending"}).eq('id', file_id).execute()
 
         # Agenda processamento usando o orquestrador existente
-        background_tasks.add_task(run_processing_conciliacao, file_id, storage_path)
+        background_tasks.add_task(run_processing_conciliacao, file_id, storage_path, layout_hint)
 
         return {"message": "Upload e processamento de conciliação agendado.", "file_id": file_id, "storage_path": storage_path}
     finally:
@@ -470,6 +482,7 @@ async def upload_planilha_url(
 class ProcessRequest(BaseModel):
     file_id: str
     storage_path: str
+    layout_hint: str | None = None
 
 class ProcessFinanceiroRequest(BaseModel):
     file_id: str
@@ -563,7 +576,7 @@ async def processar_planilha_financeiro_endpoint(process_request: ProcessFinance
     background_tasks.add_task(run_processing_financeiro, process_request.file_id)
     return {"message": "Processamento da planilha financeira agendado com sucesso!", "file_id": process_request.file_id}
 
-def run_processing_conciliacao(file_id: str, storage_path: str):
+def run_processing_conciliacao(file_id: str, storage_path: str, layout_hint: str | None = None):
     """Função segura que executa o processamento de CONCILIAÇÃO em background."""
     supabase_processor = None
     logger = None
@@ -583,10 +596,12 @@ def run_processing_conciliacao(file_id: str, storage_path: str):
         account_id = response.data['account_id']
         print(f"[CONCILIATION_TASK] account_id {account_id} encontrado com sucesso.")
 
-        logger.set_context(file_id=file_id, account_id=account_id)
+        logger.set_context(file_id=file_id, account_id=account_id, layout_hint=layout_hint)
 
         # Faz o download do arquivo para um local temporário
         logger.log('INFO', f'Iniciando download do arquivo de conciliação: {storage_path}')
+        if layout_hint:
+            logger.log('INFO', f'Layout hint recebido: {layout_hint}')
         print(f"[CONCILIATION_TASK] Preparando para download. Storage path: {storage_path}")
         path_parts = storage_path.lstrip('/').split('/')
         bucket_name = path_parts[0]
@@ -611,7 +626,8 @@ def run_processing_conciliacao(file_id: str, storage_path: str):
             supabase_client=supabase_processor,
             file_path=temp_file_path,
             file_id=file_id,
-            account_id=account_id
+            account_id=account_id,
+            layout_hint=layout_hint,
         )
 
         logger.log('INFO', 'Função de processamento de conciliação concluída com sucesso.')
@@ -639,5 +655,10 @@ async def processar_planilha_conciliacao_endpoint(process_request: ProcessReques
     [CONCILIAÇÃO] Recebe um `file_id` e agenda o processamento da planilha de conciliação correspondente em background.
     Retorna uma resposta imediata de sucesso.
     """
-    background_tasks.add_task(run_processing_conciliacao, process_request.file_id, process_request.storage_path)
+    background_tasks.add_task(
+        run_processing_conciliacao,
+        process_request.file_id,
+        process_request.storage_path,
+        process_request.layout_hint,
+    )
     return {"message": "Processamento da planilha de conciliação agendado com sucesso!", "file_id": process_request.file_id}

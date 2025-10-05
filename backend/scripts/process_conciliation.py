@@ -14,8 +14,8 @@ from supabase import Client
 TABLE_CONCILIATION = 'ifood_conciliation'
 TABLE_FILES = 'received_files'
 
-# Mapeamento exato das colunas do Excel para as colunas da tabela
-COLUMNS_MAPPING = {
+# Mapeamentos de colunas – mantendo suporte ao layout legado e ao layout v3
+COLUMNS_MAPPING_LEGACY = {
     'competencia': 'competence_date',
     'data_fato_gerador': 'event_date',
     'fato_gerador': 'event_trigger',
@@ -46,7 +46,21 @@ COLUMNS_MAPPING = {
     'canal_vendas': 'sales_channel',
     'impacto_no_repasse': 'payment_impact',
     'parcela_pagamento': 'payment_installment',
+    'pedido_detalhes': 'order_details',  # tolera legado com essa coluna opcional
+    'metodo_pagamento': 'payment_method',
+    'bandeira_pagamento': 'payment_brand',
 }
+
+COLUMNS_MAPPING_V3 = {
+    **COLUMNS_MAPPING_LEGACY,
+    'pedido_detalhes': 'order_details',
+    'id_saldo': 'balance_id',
+    'metodo_pagamento': 'payment_method',
+    'bandeira_pagamento': 'payment_brand',
+}
+
+V3_MARKERS = {'pedido_detalhes', 'id_saldo', 'metodo_pagamento', 'bandeira_pagamento'}
+LEGACY_MARKERS = {'responsavel_transacao', 'base_calculo'}
 
 # Colunas que identificam de forma estável uma linha (chave natural)
 # Ajuste se necessário conforme o modelo de dados do iFood.
@@ -63,7 +77,46 @@ NATURAL_KEY_COLUMNS = [
     'settlement_start_date',
     'settlement_end_date',
     'payment_installment',
+]  # balance_id pode diferenciar lançamentos no layout v3
+
+# Se a planilha v3 fornecer id_saldo, ele auxilia na identificação única
+if 'balance_id' not in NATURAL_KEY_COLUMNS:
+    NATURAL_KEY_COLUMNS.append('balance_id')
+
+# Colunas adicionais presentes no schema final
+EXTRA_COLUMNS = [
+    'order_details',
+    'payment_method',
+    'payment_brand',
+    'balance_id',
+    'layout_version',
 ]
+
+
+def normalize_layout_hint(layout_hint: str | None) -> str | None:
+    if not layout_hint:
+        return None
+    layout_hint = layout_hint.strip().lower()
+    if layout_hint in {'legacy', 'v3'}:
+        return layout_hint
+    return None
+
+
+def detect_layout(columns: set[str], layout_hint: str | None = None) -> str:
+    normalized_hint = normalize_layout_hint(layout_hint)
+    if normalized_hint:
+        return normalized_hint
+
+    if V3_MARKERS.issubset(columns):
+        return 'v3'
+    # fallback legado por padrão
+    return 'legacy'
+
+
+def get_mapping_for_layout(layout_version: str) -> dict[str, str]:
+    if layout_version == 'v3':
+        return COLUMNS_MAPPING_V3
+    return COLUMNS_MAPPING_LEGACY
 
 def update_file_status(logger, supabase_client: Client, file_id: str, status: str, details: str = None):
     """Atualiza o status do registro em `public.received_files` e mantém consistência de colunas auxiliares.
@@ -105,13 +158,18 @@ def update_file_status(logger, supabase_client: Client, file_id: str, status: st
     except Exception as e:
         logger.log('error', f"Falha ao atualizar status do arquivo {file_id}: {e}")
 
-def read_and_clean_data(logger, file_path: str) -> pd.DataFrame:
-    """Lê a segunda aba do Excel, cria dump bruto por linha e aplica limpeza/mapeamento."""
+def read_and_clean_data(logger, file_path: str, layout_hint: str | None = None) -> tuple[pd.DataFrame, str]:
+    """Lê a segunda aba do Excel, detecta layout (legacy/v3), cria dump bruto e aplica limpeza."""
     try:
         logger.log('info', 'Iniciando leitura da planilha (aba 2)...')
         # Lê os dados originais preservando tipos o máximo possível
         original_df = pd.read_excel(file_path, sheet_name=1, header=0, dtype=object)
         logger.log('info', f'{len(original_df)} linhas lidas da planilha.')
+
+        columns_lower = {str(col).strip().lower() for col in original_df.columns}
+        layout_version = detect_layout(columns_lower, layout_hint)
+        logger.log('info', f'Layout detectado: {layout_version} (hint={layout_hint})')
+        column_mapping = get_mapping_for_layout(layout_version)
 
         # Gera dump bruto literal por linha (valores convertidos a string, NaN/None -> string vazia)
         def to_raw_original(row: pd.Series) -> str:
@@ -133,7 +191,7 @@ def read_and_clean_data(logger, file_path: str) -> pd.DataFrame:
         # Converte NaN para None no dataframe antes do restante do pipeline
         df = df.replace({np.nan: None})
 
-        df.rename(columns=COLUMNS_MAPPING, inplace=True)
+        df.rename(columns=column_mapping, inplace=True)
         logger.log('info', 'Colunas renomeadas com sucesso.')
 
         date_columns = [
@@ -147,7 +205,8 @@ def read_and_clean_data(logger, file_path: str) -> pd.DataFrame:
 
         id_columns = [
             'ifood_order_id', 'ifood_order_id_short', 'external_order_id',
-            'store_id', 'store_id_short', 'store_id_external', 'cnpj'
+            'store_id', 'store_id_short', 'store_id_external', 'cnpj',
+            'balance_id'
         ]
         for col in id_columns:
             if col in df.columns:
@@ -169,13 +228,18 @@ def read_and_clean_data(logger, file_path: str) -> pd.DataFrame:
                 # Normaliza infinidades para NaN para posterior conversão a None
                 df[col] = df[col].replace([np.inf, -np.inf], np.nan)
         
-        final_columns = list(COLUMNS_MAPPING.values())
+        final_columns = list(dict.fromkeys(column_mapping.values()))
+        for extra in EXTRA_COLUMNS:
+            if extra not in final_columns:
+                final_columns.append(extra)
         # Garante que todas as colunas esperadas existam; se faltarem no Excel, cria com None
         missing_cols = [c for c in final_columns if c not in df.columns]
         if missing_cols:
             logger.log('warning', f"Colunas ausentes no arquivo: {missing_cols}. Preenchendo com None.")
             for col in missing_cols:
                 df[col] = None
+
+        df['layout_version'] = layout_version
         df = df[final_columns]
         # Após todas as transformações, converte NaN/±Inf para None para compatibilidade JSON
         df = df.replace({np.nan: None})
@@ -213,7 +277,7 @@ def read_and_clean_data(logger, file_path: str) -> pd.DataFrame:
         logger.log('info', '===============================================================\n')
         logger.log('info', '>>> FIM DA AMOSTRA DE DADOS <<<')
 
-        return df
+        return df, layout_version
 
     except Exception as e:
         logger.log('error', f'Falha ao ler ou limpar os dados do Excel: {e}')
@@ -282,22 +346,22 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
             raise
     logger.log('info', 'Todos os lotes foram salvos com sucesso.')
 
-def process_conciliation_file(logger, supabase_client: Client, file_path: str, file_id: str, account_id: str):
+def process_conciliation_file(logger, supabase_client: Client, file_path: str, file_id: str, account_id: str, layout_hint: str | None = None):
     """Orquestra o processo completo de ponta a ponta."""
     try:
         logger.set_context(file_id=file_id, account_id=account_id)
         logger.log('info', f'Iniciando processamento do arquivo de conciliação: {file_path}')
         update_file_status(logger, supabase_client, file_id, 'processing')
 
-        df = read_and_clean_data(logger, file_path)
-        
+        df, layout_version = read_and_clean_data(logger, file_path, layout_hint=layout_hint)
+        logger.log('info', f'Layout efetivamente processado: {layout_version}')
+
         if df is not None and not df.empty:
             save_data_in_batches(logger, supabase_client, df, account_id, file_id)
             update_file_status(logger, supabase_client, file_id, 'processed')
             logger.log('info', 'Processamento do arquivo concluído com sucesso.')
         else:
             update_file_status(logger, supabase_client, file_id, 'error', 'O arquivo Excel está vazio ou não contém dados na segunda aba.')
-            logger.log('warning', 'O DataFrame está vazio após a leitura. Nenhum dado para salvar.')
 
     except Exception as e:
         error_message = f"Erro fatal no processamento: {e}"
