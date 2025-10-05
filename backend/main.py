@@ -69,11 +69,74 @@ else:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 print("[DEBUG] Cliente Supabase inicializado.")
 
+# Metadados reutilizados na documentação interativa (/docs e /redoc)
+tags_metadata = [
+    {
+        "name": "Status",
+        "description": (
+            "Endpoints de verificação de saúde, versão e visibilidade geral da API Dex. "
+            "Use antes de integrações automatizadas para checar se o deploy está ativo."
+        ),
+    },
+    {
+        "name": "Uploads",
+        "description": (
+            "Serviços responsáveis por receber planilhas (arquivo local ou URL) e armazenar"
+            " no Supabase Storage em buckets específicos (financeiro, conciliação, etc.)."
+        ),
+    },
+    {
+        "name": "Frontend",
+        "description": (
+            "Rotas utilizadas pelo frontend da Dex para orquestrar uploads, registrar"
+            " arquivos e iniciar fluxos internos. Ideal para times que precisam executar"
+            " estas tarefas fora do monolito web."
+        ),
+    },
+    {
+        "name": "Processamento",
+        "description": (
+            "Orquestração de tarefas em background que processam conciliações e relatórios"
+            " financeiros. Os retornos são assíncronos e atualizam o Supabase."
+        ),
+    },
+    {
+        "name": "WhatsApp",
+        "description": (
+            "Integração com o WhatsApp Cloud API (webhooks, envio de templates e consultas"
+            " administrativas). Consulte antes de configurar novos fluxos conversacionais."
+        ),
+    },
+    {
+        "name": "SQL Agent",
+        "description": (
+            "Consultas estruturadas à base de dados por meio do agente SQL. Fica visível"
+            " somente quando o módulo opcional é carregado durante o deploy."
+        ),
+    },
+    {
+        "name": "Forms",
+        "description": (
+            "Formulários simples de onboarding/diagnóstico usados em testes ou validações"
+            " rápidas. Úteis para demonstrações e para ver fluxos completos sem frontend."
+        ),
+    },
+]
+
 # Cria a aplicação FastAPI
 app = FastAPI(
     title="Dex API",
-    description="API para uploads Financeiro/Conciliação e processamento.",
-    version="1.0.0"
+    description=(
+        "Coleção oficial de serviços Dex para uploads, conciliações, integrações"
+        " WhatsApp e automações SQL. Cada grupo possui documentação detalhada nas"
+        " seções abaixo."
+    ),
+    version="1.0.0",
+    contact={
+        "name": "Equipe Dex",
+        "email": "suporte@usa-dex.com.br",
+    },
+    openapi_tags=tags_metadata,
 )
 print("[DEBUG] FastAPI inicializado.")
 
