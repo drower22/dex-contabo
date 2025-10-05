@@ -259,7 +259,7 @@ async def upload_planilha(
 # Endpoints Frontend Aux
 # =======================
 
-@app.post("/frontend/upload/financeiro", tags=["Frontend"], summary="Frontend: Upload para bucket financeiro via script e cria registro")
+@app.post("/frontend-api/upload/financeiro", tags=["Frontend"], summary="Frontend: Upload para bucket financeiro via script e cria registro")
 async def frontend_upload_financeiro(
     file: UploadFile = File(...),
     account_id: str = Form(...),
@@ -329,7 +329,7 @@ async def frontend_upload_financeiro(
         except Exception:
             pass
 
-@app.post("/frontend/upload-process/conciliacao", tags=["Frontend"], summary="Frontend: Upload para conciliação e dispara processamento")
+@app.post("/frontend-api/upload-process/conciliacao", tags=["Frontend"], summary="Frontend: Upload para conciliação e dispara processamento")
 async def frontend_upload_process_conciliacao(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
