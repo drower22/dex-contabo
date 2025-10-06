@@ -350,15 +350,15 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
 
     logger.log('info', f"[DEBUG] Colunas a serem salvas: {df.columns.tolist()}")
     records_to_insert = []
-    for idx, rec in enumerate(df.to_dict(orient='records')):
+    for rec in df.to_dict(orient='records'):
         sanitized = _sanitize_record(rec)
         raw = sanitized.get('raw_data')
         if raw is None:
             base_payload = json.dumps(sanitized, ensure_ascii=False, sort_keys=True, default=str)
         else:
             base_payload = raw
-        deterministic_id = hashlib.sha256(f"{account_id}|{base_payload}".encode('utf-8')).hexdigest()
-        sanitized['id'] = deterministic_id
+        deterministic_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{account_id}|{base_payload}")
+        sanitized['id'] = str(deterministic_id)
         records_to_insert.append(sanitized)
 
     seen_ids: set[str] = set()
