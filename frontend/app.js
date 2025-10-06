@@ -5,7 +5,7 @@
 
   const normalizeBase = (u)=> (u||'').trim().replace(/\/+$/,'');
 
-  const baseUrl = state.baseUrl || 'https://dex-novo-railway-production.up.railway.app';
+  const baseUrl = state.baseUrl || 'https://api.usa-dex.com.br';
   const verifyToken = state.verifyToken || '';
   const adminToken = state.adminToken || '';
   const tplName = state.tplName || 'whatsapp_verification';
@@ -176,11 +176,16 @@
         body: form
       });
 
-      const txt = await res.text();
-      concOut.textContent = `${res.status} ${res.statusText}\n\n${txt}`;
+      let bodyText = await res.text();
+      let parsed;
+      try{ parsed = JSON.parse(bodyText); }
+      catch{ parsed = null; }
 
-      if (res.ok){
-        // Limpa campos opcionais para facilitar múltiplos envios
+      if (!res.ok){
+        const detail = parsed?.detail || parsed?.error || bodyText || 'Erro desconhecido.';
+        concOut.textContent = `${res.status} ${res.statusText}\n\n${detail}`;
+      } else {
+        concOut.textContent = `${res.status} ${res.statusText}\n\n${bodyText}`;
         if (fileInput) fileInput.value = '';
         if ($('concFileId')) $('concFileId').value = '';
       }

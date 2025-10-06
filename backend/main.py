@@ -350,6 +350,38 @@ async def frontend_upload_process_conciliacao(
     import tempfile
     try:
         file_id = file_id or str(uuid.uuid4())
+
+        # Valida o formato do account_id (UUID interno Dex) e verifica se existe
+        try:
+            account_uuid = uuid.UUID(str(account_id))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="`account_id` inválido. Informe o UUID interno da Dex (coluna accounts.id).",
+            ) from exc
+
+        try:
+            account_lookup = (
+                supabase
+                .table('accounts')
+                .select('id')
+                .eq('id', str(account_uuid))
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            print(f"[DEX][CONCILIACAO] Falha ao validar account_id no Supabase: {exc}")
+            raise HTTPException(
+                status_code=502,
+                detail="Não foi possível validar o account_id no Supabase. Tente novamente em instantes ou contate o suporte.",
+            ) from exc
+
+        if not account_lookup.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Account Dex não encontrada. Confirme o UUID interno (accounts.id) e tente novamente.",
+            )
+
         suffix = os.path.splitext(file.filename or "")[1] or ".bin"
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             contents = await file.read()
@@ -364,26 +396,40 @@ async def frontend_upload_process_conciliacao(
         bucket_name = "conciliacao"
         # Gera caminho único
         path_in_bucket = _ensure_unique_path(supabase, bucket_name, account_id, os.path.basename(file.filename or f"{file_id}{suffix}"))
-        with open(temp_path, 'rb') as fh:
-            supabase.storage.from_(bucket_name).upload(
-                path=path_in_bucket,
-                file=fh.read(),
-                file_options={"cache-control": "3600", "upsert": "false"}
-            )
+        try:
+            with open(temp_path, 'rb') as fh:
+                supabase.storage.from_(bucket_name).upload(
+                    path=path_in_bucket,
+                    file=fh.read(),
+                    file_options={"cache-control": "3600", "upsert": "false"}
+                )
+        except Exception as exc:
+            print(f"[DEX][CONCILIACAO] Falha ao enviar arquivo para o storage: {exc}")
+            raise HTTPException(
+                status_code=502,
+                detail="Falha ao enviar arquivo ao Supabase Storage. Verifique o arquivo e tente novamente.",
+            ) from exc
 
         storage_path = f"{bucket_name}/{path_in_bucket}"
 
         # Registra em received_files
         record = {
             "id": file_id,
-            "account_id": account_id,
+            "account_id": str(account_uuid),
             "storage_path": storage_path,
             "status": "pending",
         }
         try:
             supabase.table('received_files').insert(record).execute()
-        except Exception:
-            supabase.table('received_files').update({"storage_path": storage_path, "status": "pending"}).eq('id', file_id).execute()
+        except Exception as exc:
+            print(f"[DEX][CONCILIACAO] Falha ao inserir em received_files: {exc}")
+            try:
+                supabase.table('received_files').update({"storage_path": storage_path, "status": "pending"}).eq('id', file_id).execute()
+            except Exception as exc_update:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Falha ao registrar arquivo em received_files. Tente novamente ou contate o suporte.",
+                ) from exc_update
 
         # Agenda processamento usando o orquestrador existente
         background_tasks.add_task(run_processing_conciliacao, file_id, storage_path, layout_hint)
@@ -596,7 +642,7 @@ def run_processing_conciliacao(file_id: str, storage_path: str, layout_hint: str
         account_id = response.data['account_id']
         print(f"[CONCILIATION_TASK] account_id {account_id} encontrado com sucesso.")
 
-        logger.set_context(file_id=file_id, account_id=account_id, layout_hint=layout_hint)
+        logger.set_context(file_id=file_id, account_id=account_id)
 
         # Faz o download do arquivo para um local temporário
         logger.log('INFO', f'Iniciando download do arquivo de conciliação: {storage_path}')
