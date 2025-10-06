@@ -334,32 +334,86 @@ def safe_to_json(row, logger):
         return json.dumps({"error": f"Falha de encoding: {e}", "original_data_cleaned": safe_dict})
 
 def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, account_id: str, file_id: str):
-    """Prepara e salva os dados no Supabase em lotes."""
+    """Prepara e salva os dados no Supabase em lotes, garantindo ausência de duplicidades."""
     logger.log('info', f'Iniciando preparação de {len(df)} registros para salvar no banco de dados.')
-    
+
+    # Remove previamente os registros associados a este received_file_id para evitar duplicidades
+    try:
+        logger.log('info', f"Removendo registros existentes em '{TABLE_CONCILIATION}' para received_file_id={file_id}...")
+        delete_resp = supabase_client.table(TABLE_CONCILIATION).delete().eq('received_file_id', file_id).execute()
+        deleted_count = 0
+        if hasattr(delete_resp, 'data') and delete_resp.data:
+            if isinstance(delete_resp.data, list):
+                deleted_count = len(delete_resp.data)
+            elif isinstance(delete_resp.data, dict):
+                deleted_count = delete_resp.data.get('count') or 0
+        logger.log('info', f'Remoção concluída. Registros apagados: {deleted_count}.')
+    except Exception as exc:
+        logger.log('warning', f'Falha ao remover registros anteriores (continuando com o processamento): {exc}')
+
     logger.log('info', 'Adicionando colunas de metadados (account_id, received_file_id, id).')
     df['account_id'] = account_id
     df['received_file_id'] = file_id
     df['id'] = [str(uuid.uuid4()) for _ in range(len(df))]
-    
+
     logger.log('info', 'Iniciando serialização segura para JSON (raw_data).')
     df['raw_data'] = df.apply(lambda row: safe_to_json(row, logger), axis=1)
     logger.log('info', 'Serialização concluída.')
 
     logger.log('info', f"[DEBUG] Colunas a serem salvas: {df.columns.tolist()}")
+    records_to_insert = [_sanitize_record(rec) for rec in df.to_dict(orient='records')]
 
-    # Converte DataFrame para lista de dicionários, remove colunas opcionais
-    # (content_hash, natural_key) para compatibilidade com schema atual e sanitiza NaN/Inf
-    records_to_insert = []
-    for rec in df.to_dict(orient='records'):
-        for drop_col in ('content_hash', 'natural_key'):
-            if drop_col in rec:
-                rec = {k: v for k, v in rec.items() if k != drop_col}
-        records_to_insert.append(_sanitize_record(rec))
-    
+    # --- Deduplicação baseada em natural_key ---
+    natural_keys = [rec.get('natural_key') for rec in records_to_insert if rec.get('natural_key')]
+    existing_by_key: dict[str, dict] = {}
+
+    def chunked(seq, size):
+        for i in range(0, len(seq), size):
+            yield seq[i:i + size]
+
+    if natural_keys:
+        logger.log('info', f'Consultando registros existentes para {len(set(natural_keys))} natural_keys...')
+        for chunk in chunked(list(set(natural_keys)), 200):
+            try:
+                resp = (
+                    supabase_client
+                    .table(TABLE_CONCILIATION)
+                    .select('id,natural_key,content_hash')
+                    .in_('natural_key', chunk)
+                    .execute()
+                )
+                data = resp.data if hasattr(resp, 'data') else resp.get('data')  # type: ignore
+                if data:
+                    for row in data:
+                        key = row.get('natural_key')
+                        if key:
+                            existing_by_key[key] = row
+            except Exception as exc:
+                logger.log('warning', f'Falha ao consultar natural_keys existentes: {exc}')
+                existing_by_key = {}
+                break
+
+    deduped_records = []
+    skipped = 0
+    updated = 0
+    for rec in records_to_insert:
+        nk = rec.get('natural_key')
+        ch = rec.get('content_hash')
+        if nk and nk in existing_by_key:
+            existing = existing_by_key[nk]
+            if existing.get('content_hash') == ch:
+                skipped += 1
+                continue
+            if existing.get('id'):
+                rec['id'] = existing['id']
+                updated += 1
+        deduped_records.append(rec)
+
+    logger.log('info', f'Deduplicação concluída: {len(deduped_records)} registros para upsert, {skipped} pulados, {updated} atualizados.')
+
     batch_size = 100
-    for i in range(0, len(records_to_insert), batch_size):
-        batch = records_to_insert[i:i + batch_size]
+    for i in range(0, len(deduped_records), batch_size):
+        batch = deduped_records[i:i + batch_size]
         try:
             logger.log('info', f'Enviando lote {i//batch_size+1}/{(len(records_to_insert)-1)//batch_size+1} para o Supabase...')
             # Padrão definitivo: upsert por 'id' (sem fallbacks)
