@@ -6,12 +6,13 @@ import uuid
 import json
 from datetime import datetime, timezone
 
+import pandas as pd
 import numpy as np
 from supabase import Client
 
 # --- Constantes ---
 TABLE_CONCILIATION = 'ifood_conciliation'
-TABLDEDUPE_IGNORE_KEYS = {'id', 'received_file_id', 'raw_data', 'raw_data_original', 'created_at', 'updated_at'}
+DEDUPE_IGNORE_KEYS = {'id', 'received_file_id', 'raw_data', 'raw_data_original', 'created_at', 'updated_at'}
 # Mapeamentos de colunas – mantendo suporte ao layout legado e ao layout v3
 COLUMNS_MAPPING_LEGACY = {
     'competencia': 'competence_date',
