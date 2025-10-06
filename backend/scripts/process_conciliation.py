@@ -276,22 +276,6 @@ def read_and_clean_data(logger, file_path: str, layout_hint: str | None = None) 
         df = df.replace({np.nan: None})
         logger.log('info', 'DataFrame finalizado e filtrado com as colunas corretas para o banco.')
 
-        # content_hash: hash do conteúdo inteiro da linha (para auditoria)
-        def content_hash(row):
-            concat = '|'.join([str(row[col]) if row[col] is not None else '' for col in final_columns])
-            return hashlib.sha256(concat.encode('utf-8')).hexdigest()
-        df['content_hash'] = df.apply(content_hash, axis=1)
-
-        # natural_key: hash apenas das colunas que definem a identidade da linha
-        def build_natural_key(row):
-            parts = []
-            for col in NATURAL_KEY_COLUMNS:
-                val = row[col] if col in row and row[col] is not None else ''
-                parts.append(str(val))
-            key_str = '|'.join(parts)
-            return hashlib.sha256(key_str.encode('utf-8')).hexdigest()
-        df['natural_key'] = df.apply(build_natural_key, axis=1)
-
         # Anexa o dump bruto original alinhado por índice
         df['raw_data_original'] = raw_original_series
 
