@@ -363,59 +363,87 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
     logger.log('info', f"[DEBUG] Colunas a serem salvas: {df.columns.tolist()}")
     records_to_insert = [_sanitize_record(rec) for rec in df.to_dict(orient='records')]
 
-    # --- Deduplicação baseada em natural_key ---
-    natural_keys = [rec.get('natural_key') for rec in records_to_insert if rec.get('natural_key')]
-    existing_by_key: dict[str, dict] = {}
+    dedupe_supported = True
+    try:
+        supabase_client.table(TABLE_CONCILIATION).select('id,natural_key,content_hash').limit(1).execute()
+    except Exception as exc:
+        dedupe_supported = False
+        logger.log(
+            'warning',
+            "Deduplicação desativada: tabela 'ifood_conciliation' não possui colunas 'natural_key'/'content_hash'.",
+            {'error': str(exc)}
+        )
 
-    def chunked(seq, size):
-        for i in range(0, len(seq), size):
-            yield seq[i:i + size]
+    deduped_records = records_to_insert
+    total_skipped = 0
+    total_updated = 0
 
-    if natural_keys:
-        logger.log('info', f'Consultando registros existentes para {len(set(natural_keys))} natural_keys...')
-        for chunk in chunked(list(set(natural_keys)), 200):
-            try:
-                resp = (
-                    supabase_client
-                    .table(TABLE_CONCILIATION)
-                    .select('id,natural_key,content_hash')
-                    .in_('natural_key', chunk)
-                    .execute()
-                )
-                data = resp.data if hasattr(resp, 'data') else resp.get('data')  # type: ignore
-                if data:
-                    for row in data:
-                        key = row.get('natural_key')
-                        if key:
-                            existing_by_key[key] = row
-            except Exception as exc:
-                logger.log('warning', f'Falha ao consultar natural_keys existentes: {exc}')
-                existing_by_key = {}
-                break
+    if dedupe_supported:
+        # --- Deduplicação baseada em natural_key ---
+        natural_keys = [rec.get('natural_key') for rec in records_to_insert if rec.get('natural_key')]
+        existing_by_key: dict[str, dict] = {}
 
-    deduped_records = []
-    skipped = 0
-    updated = 0
-    for rec in records_to_insert:
-        nk = rec.get('natural_key')
-        ch = rec.get('content_hash')
-        if nk and nk in existing_by_key:
-            existing = existing_by_key[nk]
-            if existing.get('content_hash') == ch:
-                skipped += 1
-                continue
-            if existing.get('id'):
-                rec['id'] = existing['id']
-                updated += 1
-        deduped_records.append(rec)
+        def chunked(seq, size):
+            for i in range(0, len(seq), size):
+                yield seq[i:i + size]
 
-    logger.log('info', f'Deduplicação concluída: {len(deduped_records)} registros para upsert, {skipped} pulados, {updated} atualizados.')
+        if natural_keys:
+            logger.log('info', f'Consultando registros existentes para {len(set(natural_keys))} natural_keys...')
+            for chunk in chunked(list(set(natural_keys)), 200):
+                try:
+                    resp = (
+                        supabase_client
+                        .table(TABLE_CONCILIATION)
+                        .select('id,natural_key,content_hash')
+                        .in_('natural_key', chunk)
+                        .execute()
+                    )
+                    data = resp.data if hasattr(resp, 'data') else resp.get('data')  # type: ignore
+                    if data:
+                        for row in data:
+                            key = row.get('natural_key')
+                            if key:
+                                existing_by_key[key] = row
+                except Exception as exc:
+                    logger.log('warning', f'Falha ao consultar natural_keys existentes: {exc}')
+                    existing_by_key = {}
+                    dedupe_supported = False
+                    break
+
+        if dedupe_supported and existing_by_key:
+            deduped_records = []
+            for rec in records_to_insert:
+                nk = rec.get('natural_key')
+                ch = rec.get('content_hash')
+                if nk and nk in existing_by_key:
+                    existing = existing_by_key[nk]
+                    if existing.get('content_hash') == ch:
+                        total_skipped += 1
+                        continue
+                    if existing.get('id'):
+                        rec['id'] = existing['id']
+                        total_updated += 1
+                deduped_records.append(rec)
+            logger.log(
+                'info',
+                f'Deduplicação concluída: {len(deduped_records)} registros para upsert, '
+                f'{total_skipped} pulados, {total_updated} atualizados.'
+            )
+        else:
+            logger.log('warning', 'Deduplicação pulada: nenhuma chave existente encontrada ou consulta falhou.')
+
+    if not dedupe_supported:
+        for rec in records_to_insert:
+            rec.pop('natural_key', None)
+            rec.pop('content_hash', None)
+        deduped_records = records_to_insert
 
     batch_size = 100
-    for i in range(0, len(deduped_records), batch_size):
-        batch = deduped_records[i:i + batch_size]
+    total_batches = (len(deduped_records) + batch_size - 1) // batch_size if deduped_records else 0
+    for batch_idx, start in enumerate(range(0, len(deduped_records), batch_size), start=1):
+        batch = deduped_records[start:start + batch_size]
         try:
-            logger.log('info', f'Enviando lote {i//batch_size+1}/{(len(records_to_insert)-1)//batch_size+1} para o Supabase...')
+            logger.log('info', f'Enviando lote {batch_idx}/{total_batches} para o Supabase...')
             # Padrão definitivo: upsert por 'id' (sem fallbacks)
             supabase_client.table(TABLE_CONCILIATION).upsert(batch, on_conflict='id').execute()
         except Exception as e:
