@@ -340,59 +340,43 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
     except Exception as exc:
         logger.log('warning', f'Falha ao remover registros anteriores (continuando com o processamento): {exc}')
 
-    logger.log('info', 'Adicionando colunas de metadados (account_id, received_file_id, id).')
+    logger.log('info', 'Adicionando colunas de metadados (account_id, received_file_id).')
     df['account_id'] = account_id
     df['received_file_id'] = file_id
-    df['id'] = [str(uuid.uuid4()) for _ in range(len(df))]
 
     logger.log('info', 'Iniciando serialização segura para JSON (raw_data).')
     df['raw_data'] = df.apply(lambda row: safe_to_json(row, logger), axis=1)
     logger.log('info', 'Serialização concluída.')
 
     logger.log('info', f"[DEBUG] Colunas a serem salvas: {df.columns.tolist()}")
-    records_to_insert = [_sanitize_record(rec) for rec in df.to_dict(orient='records')]
+    records_to_insert = []
+    for idx, rec in enumerate(df.to_dict(orient='records')):
+        sanitized = _sanitize_record(rec)
+        raw = sanitized.get('raw_data')
+        if raw is None:
+            base_payload = json.dumps(sanitized, ensure_ascii=False, sort_keys=True, default=str)
+        else:
+            base_payload = raw
+        deterministic_id = hashlib.sha256(f"{account_id}|{base_payload}".encode('utf-8')).hexdigest()
+        sanitized['id'] = deterministic_id
+        records_to_insert.append(sanitized)
 
-    seen_raw_data: set[str] = set()
+    seen_ids: set[str] = set()
     unique_records = []
     skipped_in_file = 0
     for rec in records_to_insert:
-        raw = rec.get('raw_data')
-        if raw is None:
+        row_id = rec.get('id')
+        if not row_id:
             unique_records.append(rec)
             continue
-        if raw in seen_raw_data:
+        if row_id in seen_ids:
             skipped_in_file += 1
             continue
-        seen_raw_data.add(raw)
+        seen_ids.add(row_id)
         unique_records.append(rec)
 
     if skipped_in_file:
-        logger.log('info', f'{skipped_in_file} linhas duplicadas no arquivo foram ignoradas (raw_data idêntico).')
-
-    # Remove previamente registros idênticos já persistidos (mesmo account_id e raw_data)
-    existing_removed = 0
-    raw_values = [rec['raw_data'] for rec in unique_records if rec.get('raw_data')]
-    for chunk in chunked(raw_values, 200):
-        try:
-            resp = (
-                supabase_client
-                .table(TABLE_CONCILIATION)
-                .select('id')
-                .eq('account_id', account_id)
-                .in_('raw_data', chunk)
-                .execute()
-            )
-            data = resp.data if hasattr(resp, 'data') else resp.get('data')  # type: ignore
-            ids_to_delete = [row['id'] for row in data or [] if row.get('id')]
-            if ids_to_delete:
-                supabase_client.table(TABLE_CONCILIATION).delete().in_('id', ids_to_delete).execute()
-                existing_removed += len(ids_to_delete)
-        except Exception as exc:
-            logger.log('warning', f'Falha ao remover duplicatas existentes por raw_data: {exc}')
-            break
-
-    if existing_removed:
-        logger.log('info', f'{existing_removed} registros idênticos existentes foram removidos antes do novo insert.')
+        logger.log('info', f'{skipped_in_file} linhas duplicadas no arquivo foram ignoradas (ID determinístico idêntico).')
 
     batch_size = 100
     total_batches = (len(unique_records) + batch_size - 1) // batch_size if unique_records else 0
