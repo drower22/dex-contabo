@@ -93,6 +93,11 @@ EXTRA_COLUMNS = [
 ]
 
 
+def chunked(seq, size):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
 def normalize_layout_hint(layout_hint: str | None) -> str | None:
     if not layout_hint:
         return None
@@ -363,85 +368,52 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
     logger.log('info', f"[DEBUG] Colunas a serem salvas: {df.columns.tolist()}")
     records_to_insert = [_sanitize_record(rec) for rec in df.to_dict(orient='records')]
 
-    dedupe_supported = True
-    try:
-        supabase_client.table(TABLE_CONCILIATION).select('id,natural_key,content_hash').limit(1).execute()
-    except Exception as exc:
-        dedupe_supported = False
-        logger.log(
-            'warning',
-            "Deduplicação desativada: tabela 'ifood_conciliation' não possui colunas 'natural_key'/'content_hash'.",
-            {'error': str(exc)}
-        )
+    seen_raw_data: set[str] = set()
+    unique_records = []
+    skipped_in_file = 0
+    for rec in records_to_insert:
+        raw = rec.get('raw_data')
+        if raw is None:
+            unique_records.append(rec)
+            continue
+        if raw in seen_raw_data:
+            skipped_in_file += 1
+            continue
+        seen_raw_data.add(raw)
+        unique_records.append(rec)
 
-    deduped_records = records_to_insert
-    total_skipped = 0
-    total_updated = 0
+    if skipped_in_file:
+        logger.log('info', f'{skipped_in_file} linhas duplicadas no arquivo foram ignoradas (raw_data idêntico).')
 
-    if dedupe_supported:
-        # --- Deduplicação baseada em natural_key ---
-        natural_keys = [rec.get('natural_key') for rec in records_to_insert if rec.get('natural_key')]
-        existing_by_key: dict[str, dict] = {}
-
-        def chunked(seq, size):
-            for i in range(0, len(seq), size):
-                yield seq[i:i + size]
-
-        if natural_keys:
-            logger.log('info', f'Consultando registros existentes para {len(set(natural_keys))} natural_keys...')
-            for chunk in chunked(list(set(natural_keys)), 200):
-                try:
-                    resp = (
-                        supabase_client
-                        .table(TABLE_CONCILIATION)
-                        .select('id,natural_key,content_hash')
-                        .in_('natural_key', chunk)
-                        .execute()
-                    )
-                    data = resp.data if hasattr(resp, 'data') else resp.get('data')  # type: ignore
-                    if data:
-                        for row in data:
-                            key = row.get('natural_key')
-                            if key:
-                                existing_by_key[key] = row
-                except Exception as exc:
-                    logger.log('warning', f'Falha ao consultar natural_keys existentes: {exc}')
-                    existing_by_key = {}
-                    dedupe_supported = False
-                    break
-
-        if dedupe_supported and existing_by_key:
-            deduped_records = []
-            for rec in records_to_insert:
-                nk = rec.get('natural_key')
-                ch = rec.get('content_hash')
-                if nk and nk in existing_by_key:
-                    existing = existing_by_key[nk]
-                    if existing.get('content_hash') == ch:
-                        total_skipped += 1
-                        continue
-                    if existing.get('id'):
-                        rec['id'] = existing['id']
-                        total_updated += 1
-                deduped_records.append(rec)
-            logger.log(
-                'info',
-                f'Deduplicação concluída: {len(deduped_records)} registros para upsert, '
-                f'{total_skipped} pulados, {total_updated} atualizados.'
+    # Remove previamente registros idênticos já persistidos (mesmo account_id e raw_data)
+    existing_removed = 0
+    raw_values = [rec['raw_data'] for rec in unique_records if rec.get('raw_data')]
+    for chunk in chunked(raw_values, 200):
+        try:
+            resp = (
+                supabase_client
+                .table(TABLE_CONCILIATION)
+                .select('id')
+                .eq('account_id', account_id)
+                .in_('raw_data', chunk)
+                .execute()
             )
-        else:
-            logger.log('warning', 'Deduplicação pulada: nenhuma chave existente encontrada ou consulta falhou.')
+            data = resp.data if hasattr(resp, 'data') else resp.get('data')  # type: ignore
+            ids_to_delete = [row['id'] for row in data or [] if row.get('id')]
+            if ids_to_delete:
+                supabase_client.table(TABLE_CONCILIATION).delete().in_('id', ids_to_delete).execute()
+                existing_removed += len(ids_to_delete)
+        except Exception as exc:
+            logger.log('warning', f'Falha ao remover duplicatas existentes por raw_data: {exc}')
+            break
 
-    if not dedupe_supported:
-        for rec in records_to_insert:
-            rec.pop('natural_key', None)
-            rec.pop('content_hash', None)
-        deduped_records = records_to_insert
+    if existing_removed:
+        logger.log('info', f'{existing_removed} registros idênticos existentes foram removidos antes do novo insert.')
 
     batch_size = 100
-    total_batches = (len(deduped_records) + batch_size - 1) // batch_size if deduped_records else 0
-    for batch_idx, start in enumerate(range(0, len(deduped_records), batch_size), start=1):
-        batch = deduped_records[start:start + batch_size]
+    total_batches = (len(unique_records) + batch_size - 1) // batch_size if unique_records else 0
+    for batch_idx, start in enumerate(range(0, len(unique_records), batch_size), start=1):
+        batch = unique_records[start:start + batch_size]
         try:
             logger.log('info', f'Enviando lote {batch_idx}/{total_batches} para o Supabase...')
             # Padrão definitivo: upsert por 'id' (sem fallbacks)
