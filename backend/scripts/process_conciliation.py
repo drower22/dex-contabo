@@ -158,12 +158,38 @@ def update_file_status(logger, supabase_client: Client, file_id: str, status: st
     except Exception as e:
         logger.log('error', f"Falha ao atualizar status do arquivo {file_id}: {e}")
 
+def _select_sheet_name(excel_file: pd.ExcelFile, layout_hint: str | None, logger) -> str:
+    sheet_names = excel_file.sheet_names
+    logger.log('info', f'Aba(s) disponíveis: {sheet_names}')
+    if not sheet_names:
+        raise ValueError('Arquivo Excel sem abas disponíveis.')
+
+    normalized_hint = normalize_layout_hint(layout_hint)
+    if normalized_hint == 'legacy' and len(sheet_names) > 1:
+        logger.log('info', f'Layout hint "legacy" detectado. Utilizando aba de índice 1: {sheet_names[1]}')
+        return sheet_names[1]
+    if normalized_hint == 'v3':
+        logger.log('info', f'Layout hint "v3" detectado. Utilizando aba de índice 0: {sheet_names[0]}')
+        return sheet_names[0]
+
+    # Heurística: se houver mais de uma aba, tentar a segunda (layout antigo) primeiro
+    if len(sheet_names) > 1:
+        return sheet_names[1]
+    return sheet_names[0]
+
+
 def read_and_clean_data(logger, file_path: str, layout_hint: str | None = None) -> tuple[pd.DataFrame, str]:
-    """Lê a segunda aba do Excel, detecta layout (legacy/v3), cria dump bruto e aplica limpeza."""
+    """Lê a planilha de conciliação, detecta layout (legacy/v3), cria dump bruto e aplica limpeza."""
     try:
-        logger.log('info', 'Iniciando leitura da planilha (aba 2)...')
-        # Lê os dados originais preservando tipos o máximo possível
-        original_df = pd.read_excel(file_path, sheet_name=1, header=0, dtype=object)
+        logger.log('info', 'Iniciando leitura da planilha...')
+        excel_file = pd.ExcelFile(file_path)
+        selected_sheet = _select_sheet_name(excel_file, layout_hint, logger)
+
+        try:
+            original_df = excel_file.parse(sheet_name=selected_sheet, header=0, dtype=object)
+        except ValueError as exc:
+            logger.log('warning', f'Aba {selected_sheet} inválida ({exc}). Tentando aba 0 como fallback.')
+            original_df = excel_file.parse(sheet_name=0, header=0, dtype=object)
         logger.log('info', f'{len(original_df)} linhas lidas da planilha.')
 
         columns_lower = {str(col).strip().lower() for col in original_df.columns}
