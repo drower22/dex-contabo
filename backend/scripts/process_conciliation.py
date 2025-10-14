@@ -184,17 +184,41 @@ def _select_sheet_name(excel_file: pd.ExcelFile, layout_hint: str | None, logger
 
 
 def read_and_clean_data(logger, file_path: str, layout_hint: str | None = None) -> tuple[pd.DataFrame, str]:
-    """Lê a planilha de conciliação, detecta layout (legacy/v3), cria dump bruto e aplica limpeza."""
+    """Lê a planilha de conciliação (CSV ou Excel), detecta layout (legacy/v3), cria dump bruto e aplica limpeza."""
     try:
         logger.log('info', 'Iniciando leitura da planilha...')
-        excel_file = pd.ExcelFile(file_path)
-        selected_sheet = _select_sheet_name(excel_file, layout_hint, logger)
+        
+        # Detectar se é CSV ou Excel pela extensão
+        file_extension = os.path.splitext(file_path)[1].lower()
+        logger.log('info', f'Extensão detectada: {file_extension}')
+        
+        if file_extension == '.csv':
+            # Ler como CSV - tentar detectar separador
+            logger.log('info', 'Lendo arquivo como CSV...')
+            # Tentar com separador ponto-e-vírgula primeiro (padrão iFood)
+            try:
+                original_df = pd.read_csv(file_path, sep=';', header=0, dtype=object, encoding='utf-8')
+                logger.log('info', f'CSV lido com separador ";" - {len(original_df)} linhas')
+            except Exception as e1:
+                logger.log('warning', f'Falha ao ler com separador ";": {e1}. Tentando vírgula...')
+                try:
+                    original_df = pd.read_csv(file_path, sep=',', header=0, dtype=object, encoding='utf-8')
+                    logger.log('info', f'CSV lido com separador "," - {len(original_df)} linhas')
+                except Exception as e2:
+                    logger.log('error', f'Falha ao ler CSV: {e2}')
+                    raise
+        else:
+            # Ler como Excel
+            logger.log('info', 'Lendo arquivo como Excel...')
+            excel_file = pd.ExcelFile(file_path)
+            selected_sheet = _select_sheet_name(excel_file, layout_hint, logger)
 
-        try:
-            original_df = excel_file.parse(sheet_name=selected_sheet, header=0, dtype=object)
-        except ValueError as exc:
-            logger.log('warning', f'Aba {selected_sheet} inválida ({exc}). Tentando aba 0 como fallback.')
-            original_df = excel_file.parse(sheet_name=0, header=0, dtype=object)
+            try:
+                original_df = excel_file.parse(sheet_name=selected_sheet, header=0, dtype=object)
+            except ValueError as exc:
+                logger.log('warning', f'Aba {selected_sheet} inválida ({exc}). Tentando aba 0 como fallback.')
+                original_df = excel_file.parse(sheet_name=0, header=0, dtype=object)
+        
         logger.log('info', f'{len(original_df)} linhas lidas da planilha.')
 
         columns_lower = {str(col).strip().lower() for col in original_df.columns}
