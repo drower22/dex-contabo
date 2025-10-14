@@ -401,6 +401,33 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
     if skipped_in_file:
         logger.log('info', f'{skipped_in_file} linhas duplicadas no arquivo foram ignoradas (ID determinístico idêntico).')
 
+    # Deletar registros antigos da mesma competência antes de inserir novos
+    # Isso garante que sempre temos apenas a versão mais recente dos dados
+    if unique_records:
+        # Pegar competências únicas dos registros a inserir
+        competences_to_delete = set()
+        for rec in unique_records:
+            comp_date = rec.get('competence_date')
+            if comp_date:
+                # Extrair ano-mês da competência (YYYY-MM)
+                if isinstance(comp_date, str) and len(comp_date) >= 7:
+                    competences_to_delete.add(comp_date[:7])  # YYYY-MM
+        
+        if competences_to_delete:
+            logger.log('info', f'Deletando registros antigos das competências: {sorted(competences_to_delete)}')
+            for comp in competences_to_delete:
+                try:
+                    # Deletar registros da competência específica para este account_id
+                    result = supabase_client.table(TABLE_CONCILIATION)\
+                        .delete()\
+                        .eq('account_id', account_id)\
+                        .gte('competence_date', f'{comp}-01')\
+                        .lt('competence_date', f'{comp}-32')\
+                        .execute()
+                    logger.log('info', f'Competência {comp} limpa para account_id {account_id}')
+                except Exception as e:
+                    logger.log('warning', f'Falha ao deletar competência {comp}: {e}')
+
     batch_size = 100
     total_batches = (len(unique_records) + batch_size - 1) // batch_size if unique_records else 0
     for batch_idx, start in enumerate(range(0, len(unique_records), batch_size), start=1):
