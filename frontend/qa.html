@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dex • QA Tester</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#0f172a;--panel:#111827;--muted:#94a3b8;--text:#e5e7eb;--accent:#22c55e;--warn:#f59e0b;--error:#ef4444}
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(135deg,#0f172a,#1f2937);color:var(--text)}
+    header{padding:20px 24px;border-bottom:1px solid #1f2937;background:rgba(17,24,39,.7);backdrop-filter: blur(8px)}
+    h1{margin:0;font-size:20px}
+    main{max-width:980px;margin:24px auto;padding:0 16px;display:grid;gap:16px}
+    .card{background:#0b1220;border:1px solid #1e293b;border-radius:12px;padding:16px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    input,button,textarea{border-radius:10px;border:1px solid #334155;background:#0b1220;color:var(--text);padding:10px 12px}
+    input,textarea{flex:1;min-width:220px}
+    textarea{min-height:100px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    button{cursor:pointer}
+    table{width:100%;border-collapse:collapse;border:1px solid #1e293b}
+    th,td{border:1px solid #1e293b;padding:8px;text-align:left}
+    th{background:#0f172a}
+    .muted{color:var(--muted);font-size:12px}
+    pre{white-space:pre-wrap;word-wrap:break-word;background:#060a13;border:1px solid #1e293b;padding:12px;border-radius:10px;max-height:360px;overflow:auto}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dex • QA Tester (NL → SQL → Execução)</h1>
+    <div class="muted">Teste perguntas em linguagem natural para a rota <code>POST /qa/ask</code>. Backend: <span id="cfgBackend"></span></div>
+  </header>
+  <main>
+    <div class="card">
+      <h2>Config</h2>
+      <div class="row">
+        <input id="baseUrl" placeholder="https://api.usa-dex.com.br" />
+        <button id="saveCfg">Salvar</button>
+        <button id="useLocal">Usar local (http://127.0.0.1:8000)</button>
+      </div>
+      <div class="muted">A URL deve apontar para seu backend FastAPI com o SQL Agent habilitado.</div>
+    </div>
+
+    <div class="card">
+      <h2>Chat</h2>
+      <div id="chatBox" style="height:220px; overflow:auto; border:1px solid #333; border-radius:6px; padding:8px; background:#0e0e12;"></div>
+      <div class="row" style="margin-top:8px;">
+        <input id="chatInput" placeholder="Digite sua mensagem..." />
+        <button id="chatSend">Enviar</button>
+        <button id="chatClear" style="margin-left:8px;">Limpar</button>
+      </div>
+      <div class="muted">Conversação simples com o GPT. O backend chama <code>/chat/echo</code>.</div>
+    </div>
+
+    <div class="card">
+      <h2>Resposta</h2>
+      <div class="muted">Modelo: <span id="model"></span></div>
+      <pre id="reply"></pre>
+      <h3>Logs</h3>
+      <pre id="logs"></pre>
+    </div>
+
+    <div class="card">
+      <h2>Logs</h2>
+      <div class="muted">Request/Response para debugging</div>
+      <pre id="logs"></pre>
+    </div>
+  </main>
+  <script src="qa.js"></script>
+</body>
+</html>

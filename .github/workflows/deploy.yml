@@ -1,0 +1,54 @@
+name: Deploy to Contabo
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (metadata only)
+        uses: actions/checkout@v4
+
+      - name: SSH ping (debug)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: 22
+          script: |
+            echo "SSH OK on $(hostname)"
+
+      - name: Remote deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: 22
+          script: |
+            set -e
+            cd /home/dex/dex-app || exit 1
+            if [ ! -d .git ]; then
+              git clone --branch main git@github.com:drower22/dex-contabo.git /home/dex/dex-app
+              cd /home/dex/dex-app
+            fi
+            git fetch --all
+            git reset --hard origin/main
+            if [ ! -d .venv ]; then
+              python3 -m venv .venv
+            fi
+            source .venv/bin/activate
+            python -m pip install -U pip
+            if [ -f requirements.txt ]; then
+              pip install -r requirements.txt
+            elif [ -f backend/requirements.txt ]; then
+              pip install -r backend/requirements.txt
+            fi
+            deactivate
+            sudo systemctl restart dex-api
+            sudo systemctl reload nginx || true
+            systemctl status dex-api --no-pager -n 10 || true

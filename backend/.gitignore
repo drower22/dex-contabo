@@ -1,0 +1,20 @@
+# Vercel
+.vercel/
+
+# Ambientes virtuais Python
+venv/
+.venv/
+
+# Caches Python
+__pycache__/
+*.pyc
+
+# Outros arquivos temporários
+*.pyo
+*.pyd
+*.swp
+.DS_Store
+.vscode/
+
+# Environment
+.env

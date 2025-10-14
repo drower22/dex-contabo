@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dex Tester</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#0f172a;--panel:#111827;--muted:#94a3b8;--text:#e5e7eb;--accent:#22c55e;--warn:#f59e0b;--error:#ef4444}
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(135deg,#0f172a,#1f2937);color:var(--text)}
+    header{padding:20px 24px;border-bottom:1px solid #1f2937;background:rgba(17,24,39,.7);backdrop-filter: blur(8px)}
+    h1{margin:0;font-size:20px}
+    main{max-width:980px;margin:24px auto;padding:0 16px;display:grid;gap:16px}
+    .card{background:#0b1220;border:1px solid #1e293b;border-radius:12px;padding:16px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    input,button,textarea{border-radius:10px;border:1px solid #334155;background:#0b1220;color:var(--text);padding:10px 12px}
+    input,textarea{flex:1;min-width:220px}
+    textarea{min-height:140px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    button{cursor:pointer}
+    .success{color:var(--accent)} .warn{color:var(--warn)} .error{color:var(--error)}
+    pre{white-space:pre-wrap;word-wrap:break-word;background:#060a13;border:1px solid #1e293b;padding:12px;border-radius:10px;max-height:360px;overflow:auto}
+    .muted{color:var(--muted);font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dex • Testador de API</h1>
+    <div class="muted">Use para checar saúde, verificação do webhook e simular um inbound WhatsApp. Para testar o QA NL→SQL, acesse <a href="/frontend/qa.html" style="color:#22c55e">QA Tester</a>.</div>
+  </header>
+  <main>
+    <div class="card">
+      <h2>Config</h2>
+      <div class="row">
+        <input id="baseUrl" placeholder="https://dex-novo-railway-production.up.railway.app" />
+        <input id="verifyToken" placeholder="WHATSAPP_VERIFY_TOKEN" />
+        <input id="adminToken" placeholder="ADMIN_TOKEN (para envios)" />
+        <button id="saveCfg">Salvar</button>
+      </div>
+      <div class="muted">Informe a URL do seu backend (ex.: https://api.usa-dex.com.br).</div>
+    </div>
+
+    <div class="card">
+      <h2>Health</h2>
+      <div class="row">
+        <button id="btnHealth">GET /</button>
+      </div>
+      <pre id="outHealth"></pre>
+    </div>
+
+    <div class="card">
+      <h2>Webhook Verify</h2>
+      <div class="row">
+        <input id="challenge" placeholder="challenge (ex: 123456)" />
+        <button id="btnVerify">GET /_webhooks/whatsapp?hub.mode=subscribe...</button>
+      </div>
+      <pre id="outVerify"></pre>
+    </div>
+
+    <div class="card">
+      <h2>Simular inbound WhatsApp (POST)</h2>
+      <textarea id="payload" spellcheck="false">{
+  "entry": [{
+    "changes": [{
+      "value": {
+        "contacts": [{"profile": {"name": "Teste"}, "wa_id": "5511999999999"}],
+        "messages": [{
+          "from": "5511999999999",
+          "id": "wamid.TESTE",
+          "timestamp": "1724920000",
+          "type": "text",
+          "text": {"body": "oi"}
+        }]
+      }
+    }]
+  }]
+}</textarea>
+      <div class="row">
+        <button id="btnSimulate">POST /_webhooks/whatsapp</button>
+      </div>
+      <pre id="outSim"></pre>
+    </div>
+
+    <div class="card">
+      <h2>Enviar Template (real)</h2>
+      <div class="row">
+        <input id="tplName" placeholder="template (ex: whatsapp_verification)" />
+        <input id="tplLang" placeholder="language (ex: pt_BR)" />
+        <button id="btnReloadUsers">Listar usuários</button>
+      </div>
+      <div class="row">
+        <select id="usersList" style="min-width:300px"></select>
+        <input id="manualNumber" placeholder="ou número E.164 (ex: 5511999999999)" />
+        <button id="btnSendTemplate">Enviar Template</button>
+      </div>
+      <div class="muted">Escolha um usuário (usa users.whatsapp_number_normalized) ou informe um número manualmente.</div>
+      <pre id="outTpl"></pre>
+    </div>
+
+    <div class="card" id="cardConciliacao">
+      <h2>Upload Conciliação (v3)</h2>
+      <div class="muted">Faça o upload manual de uma planilha de conciliação (layout antigo ou novo). O arquivo será enviado ao Supabase e o processamento será agendado automaticamente.</div>
+      <div class="row">
+        <input id="concAccountId" placeholder="Account ID (obrigatório)" />
+        <input id="concLayoutHint" placeholder="Layout hint (ex: legacy, v3)" />
+      </div>
+      <div class="row">
+        <input id="concFileId" placeholder="File ID (opcional)" />
+        <input id="concFile" type="file" accept=".xlsx,.xls" />
+      </div>
+      <div class="row">
+        <button id="btnConcUpload">Enviar planilha</button>
+      </div>
+      <pre id="outConc"></pre>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
