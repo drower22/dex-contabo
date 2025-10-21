@@ -13,7 +13,7 @@ from supabase import Client
 # --- Constantes ---
 TABLE_CONCILIATION = 'ifood_conciliation'
 TABLE_FILES = 'received_files'
-DEDUPE_IGNORE_KEYS = {'id', 'received_file_id', 'raw_data', 'raw_data_original', 'created_at', 'updated_at'}
+DEDUPE_IGNORE_KEYS = {'id', 'received_file_id', 'raw_data_original', 'created_at', 'updated_at'}
 # Mapeamentos de colunas – mantendo suporte ao layout legado e ao layout v3
 COLUMNS_MAPPING_LEGACY = {
     'competencia': 'competence_date',
@@ -367,9 +367,6 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
     logger.log('info', 'Adicionando coluna account_id aos registros.')
     df['account_id'] = account_id
 
-    logger.log('info', 'Iniciando serialização segura para JSON (raw_data).')
-    df['raw_data'] = df.apply(lambda row: safe_to_json(row, logger), axis=1)
-    logger.log('info', 'Serialização concluída.')
 
     logger.log('info', 'Adicionando coluna received_file_id aos registros.')
     df['received_file_id'] = file_id
