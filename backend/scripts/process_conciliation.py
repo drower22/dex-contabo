@@ -13,7 +13,7 @@ from supabase import Client
 # --- Constantes ---
 TABLE_CONCILIATION = 'ifood_conciliation'
 TABLE_FILES = 'received_files'
-DEDUPE_IGNORE_KEYS = {'id', 'received_file_id', 'raw_data_original', 'created_at', 'updated_at'}
+DEDUPE_IGNORE_KEYS = {'id', 'received_file_id', 'created_at', 'updated_at'}
 # Mapeamentos de colunas – mantendo suporte ao layout legado e ao layout v3
 COLUMNS_MAPPING_LEGACY = {
     'competencia': 'competence_date',
@@ -226,21 +226,6 @@ def read_and_clean_data(logger, file_path: str, layout_hint: str | None = None) 
         logger.log('info', f'Layout detectado: {layout_version} (hint={layout_hint})')
         column_mapping = get_mapping_for_layout(layout_version)
 
-        # Gera dump bruto literal por linha (valores convertidos a string, NaN/None -> string vazia)
-        def to_raw_original(row: pd.Series) -> str:
-            raw = {}
-            for k, v in row.to_dict().items():
-                try:
-                    if pd.isna(v):
-                        raw[k] = ''
-                    else:
-                        raw[k] = str(v)
-                except Exception:
-                    raw[k] = str(v) if v is not None else ''
-            return json.dumps(raw, ensure_ascii=False)
-
-        raw_original_series = original_df.apply(to_raw_original, axis=1)
-
         # Passa a trabalhar numa cópia que será limpa
         df = original_df.copy()
         # Converte NaN para None no dataframe antes do restante do pipeline
@@ -299,9 +284,6 @@ def read_and_clean_data(logger, file_path: str, layout_hint: str | None = None) 
         # Após todas as transformações, converte NaN/±Inf para None para compatibilidade JSON
         df = df.replace({np.nan: None})
         logger.log('info', 'DataFrame finalizado e filtrado com as colunas corretas para o banco.')
-
-        # Anexa o dump bruto original alinhado por índice
-        df['raw_data_original'] = raw_original_series
 
         # Não remover duplicatas: manter 100% das linhas conforme planilha
         logger.log('info', 'Deduplicação desativada: todas as linhas da planilha serão mantidas.')
