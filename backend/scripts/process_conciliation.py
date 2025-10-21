@@ -353,7 +353,7 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
     logger.log('info', 'Adicionando coluna received_file_id aos registros.')
     df['received_file_id'] = file_id
 
-    logger.log('info', f"[DEBUG] Colunas a serem salvas: {df.columns.tolist()}")
+    logger.log('info', f"[DEBUG] Colunas a serem salvas: {df.columns.tolist()} (total registros={len(df)})")
     records_to_insert = []
     for rec in df.to_dict(orient='records'):
         sanitized = _sanitize_record(rec)
