@@ -1,0 +1,56 @@
+// AES-GCM helpers for Node 18+ (Web Crypto) running on Vercel functions
+// Requires ENCRYPTION_KEY as base64 (32 bytes) in the environment
+
+function getKeyBytes(): Uint8Array {
+  const b64 = process.env.ENCRYPTION_KEY || '';
+  if (!b64) throw new Error('Missing ENCRYPTION_KEY');
+  try {
+    return Uint8Array.from(Buffer.from(b64, 'base64'));
+  } catch {
+    throw new Error('Invalid ENCRYPTION_KEY: must be base64');
+  }
+}
+
+async function importKey() {
+  const keyBytes = getKeyBytes();
+  return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+export async function encryptToB64(plain: string): Promise<string> {
+  const key = await importKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const enc = new TextEncoder().encode(String(plain));
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc);
+  const payload = new Uint8Array(iv.length + (cipher as ArrayBuffer).byteLength);
+  payload.set(iv, 0);
+  payload.set(new Uint8Array(cipher as ArrayBuffer), iv.length);
+  return Buffer.from(payload).toString('base64');
+}
+
+export async function decryptFromB64(b64: string): Promise<string> {
+  try {
+    if (!b64 || typeof b64 !== 'string') {
+      throw new Error('Invalid input: b64 must be a non-empty string');
+    }
+    
+    const key = await importKey();
+    const bytes = new Uint8Array(Buffer.from(b64, 'base64'));
+    
+    if (bytes.length < 13) {
+      throw new Error(`Invalid encrypted data: too short (${bytes.length} bytes, expected at least 13)`);
+    }
+    
+    const iv = bytes.slice(0, 12);
+    const data = bytes.slice(12);
+    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
+    return new TextDecoder().decode(plainBuf);
+  } catch (e: any) {
+    console.error('[crypto] decryptFromB64 error:', {
+      error: e.message,
+      hasKey: !!process.env.ENCRYPTION_KEY,
+      inputLength: b64?.length,
+      inputPreview: b64?.substring(0, 20) + '...'
+    });
+    throw new Error(`Decryption failed: ${e.message}`);
+  }
+}
