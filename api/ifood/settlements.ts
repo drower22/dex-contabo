@@ -156,29 +156,14 @@ async function ingestSettlementsByPayment({
     const supabase = getSupabaseClient();
     const chunks = chunkArray(dedupedRows, 200);
     for (const chunk of chunks) {
-      for (const row of chunk) {
-        const updatePayload = { ...row } as any;
-        delete updatePayload.id;
-        delete updatePayload.created_at;
-        // Nunca mudar chaves/imutáveis no UPDATE
-        delete updatePayload.settlement_id;
-        delete updatePayload.start_date_calculation;
-        delete updatePayload.end_date_calculation;
-        delete updatePayload.source_period_start;
-        delete updatePayload.source_period_end;
-        const { error: updErr, count } = await supabase
-          .from('ifood_settlement_items')
-          .update(updatePayload, { count: 'exact' as any })
-          .eq('merchant_id', row.merchant_id)
-          .eq('settlement_id', row.settlement_id)
-          .eq('item_id', row.item_id);
-        if (updErr) throw new Error(`Erro ao atualizar título: ${updErr.message}`);
-        if ((count || 0) > 0) continue;
-        const { error: insErr } = await supabase
-          .from('ifood_settlement_items')
-          .insert(row as any);
-        if (insErr) throw new Error(`Erro ao inserir título: ${insErr.message}`);
-      }
+      // Usar upsert ao invés de update/insert manual
+      const { error: upsertErr } = await supabase
+        .from('ifood_settlement_items')
+        .upsert(chunk, {
+          onConflict: 'merchant_id,settlement_id,item_id',
+          ignoreDuplicates: false
+        });
+      if (upsertErr) throw new Error(`Erro ao fazer upsert de títulos: ${upsertErr.message}`);
     }
   }
 
@@ -371,33 +356,16 @@ async function ingestSettlements({
     }
     const dedupedRows = Array.from(uniqMap.values());
     const supabase = getSupabaseClient();
-    // Estratégia: UPDATE por (merchant_id, item_id). Se não existir, INSERT.
-    // Isso garante que mudanças de status/settlement_id sobrescrevam a linha existente ao invés de criar outra.
+    // Usar upsert nativo do Supabase para evitar erros de constraint duplicada
     const chunks = chunkArray(dedupedRows, 200);
     for (const chunk of chunks) {
-      for (const row of chunk) {
-        const updatePayload = { ...row } as any;
-        delete updatePayload.id;
-        delete updatePayload.created_at;
-        // Não sobrescrever campos de período/competência já atribuídos
-        delete updatePayload.start_date_calculation;
-        delete updatePayload.end_date_calculation;
-        delete updatePayload.source_period_start;
-        delete updatePayload.source_period_end;
-        // 1) Tenta atualizar por merchant_id + item_id (apenas campos mutáveis)
-        const { error: updErr, count } = await supabase
-          .from('ifood_settlement_items')
-          .update(updatePayload, { count: 'exact' as any })
-          .eq('merchant_id', row.merchant_id)
-          .eq('item_id', row.item_id);
-        if (updErr) throw new Error(`Erro ao atualizar título: ${updErr.message}`);
-        if ((count || 0) > 0) continue;
-        // 2) Não existia: insere
-        const { error: insErr } = await supabase
-          .from('ifood_settlement_items')
-          .insert(row as any);
-        if (insErr) throw new Error(`Erro ao inserir título: ${insErr.message}`);
-      }
+      const { error: upsertErr } = await supabase
+        .from('ifood_settlement_items')
+        .upsert(chunk, {
+          onConflict: 'merchant_id,settlement_id,item_id',
+          ignoreDuplicates: false
+        });
+      if (upsertErr) throw new Error(`Erro ao fazer upsert de títulos: ${upsertErr.message}`);
     }
   }
 
