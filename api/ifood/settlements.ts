@@ -663,14 +663,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       error: e?.message || String(e),
       stack: e?.stack,
       merchantId: req.query?.merchantId || req.body?.merchantId,
-      method: req.method
+      method: req.method,
+      body: req.body,
+      url: req.url
     });
     res.setHeader('X-Trace-Id', traceId);
     return res.status(500).json({ 
       error: 'Erro interno no servidor: proxy.', 
       details: e?.message || String(e),
+      stack: process.env.NODE_ENV === 'development' ? e?.stack : undefined,
       hint: 'Verifique se o token está válido e se o merchantId está correto',
-      traceId 
+      traceId,
+      requestInfo: {
+        method: req.method,
+        merchantId: req.query?.merchantId || req.body?.merchantId,
+        hasToken: !!(req.headers['x-ifood-token'] || req.headers['authorization'] || req.body?.accessToken),
+        bodyKeys: req.body ? Object.keys(req.body) : []
+      }
     });
   }
 }
