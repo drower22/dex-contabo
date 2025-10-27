@@ -1,22 +1,21 @@
 /**
  * @file api/ifood-auth/status.ts
- * @description Retorna o status em tempo real da conexão iFood para uma loja/escopo.
+ * @description Rota serverless que verifica o status da autenticação iFood para uma conta específica.
  *
- * GET /api/ifood-auth/status?accountId=...&scope=reviews|financial
+ * Query Parameters:
+ * - accountId (obrigatório): ID interno da conta/loja no sistema
+ * - scope (obrigatório): 'reviews' ou 'financial'
  *
- * Lógica:
- * - Busca o access_token criptografado em ifood_store_auth (por account_id + scope)
- * - Descriptografa usando ENCRYPTION_KEY
- * - Chama merchant/v1.0/merchants/me no iFood
- * - connected: HTTP 200
- * - pending: HTTP 401/403
- * - error: demais códigos ou exceções
+ * Retorna:
+ * - { status: 'connected' | 'pending' | 'error', message?: string }
+ *
+ * Variáveis de ambiente utilizadas:
+ * - SUPABASE_URL (obrigatória)
+ * - SUPABASE_SERVICE_ROLE_KEY (obrigatória)
+ * - CORS_ORIGIN (opcional)
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { decryptFromB64 } from '../_shared/crypto';
-
-const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -36,40 +35,94 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const accountId = String(req.query.accountId || '').trim();
-  const scopeQ = String(req.query.scope || '').trim().toLowerCase();
-  const scope = scopeQ === 'financial' ? 'financial' : 'reviews';
+  const { accountId, scope } = req.query;
 
-  if (!accountId) {
-    return res.status(400).json({ error: 'bad_request', message: 'accountId is required' });
+  if (!accountId || typeof accountId !== 'string') {
+    return res.status(400).json({ error: 'Missing or invalid accountId parameter' });
+  }
+
+  if (!scope || (scope !== 'reviews' && scope !== 'financial')) {
+    return res.status(400).json({ error: 'Missing or invalid scope parameter. Must be "reviews" or "financial"' });
   }
 
   try {
-    const { data: auth, error } = await supabase
+    // Busca o registro de autenticação no Supabase
+    const { data, error } = await supabase
       .from('ifood_store_auth')
-      .select('access_token')
+      .select('status, refresh_token, access_token, expires_at')
       .eq('account_id', accountId)
       .eq('scope', scope)
       .maybeSingle();
 
-    if (error || !auth?.access_token) {
-      return res.status(200).json({ status: 'pending' });
+    if (error) {
+      console.error('[ifood-auth/status] Supabase error:', error);
+      return res.status(500).json({ 
+        status: 'error', 
+        message: 'Database query failed',
+        error: error.message 
+      });
     }
 
-    const accessToken = await decryptFromB64(auth.access_token as string);
-
-    try {
-      const resp = await fetch(`${IFOOD_BASE_URL}/merchant/v1.0/merchants/me`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      } as any);
-
-      if (resp.ok) return res.status(200).json({ status: 'connected' });
-      if (resp.status === 401 || resp.status === 403) return res.status(200).json({ status: 'pending' });
-      return res.status(200).json({ status: 'error' });
-    } catch (_) {
-      return res.status(200).json({ status: 'error' });
+    // Se não há registro, status é 'pending'
+    if (!data) {
+      return res.status(200).json({ 
+        status: 'pending',
+        message: 'No authentication record found for this account and scope'
+      });
     }
+
+    // Verifica se tem refresh_token válido
+    if (!data.refresh_token) {
+      return res.status(200).json({ 
+        status: 'pending',
+        message: 'Authentication not completed - missing refresh token'
+      });
+    }
+
+    // Verifica se o token está expirado (se houver expires_at)
+    if (data.expires_at) {
+      const expiresAt = new Date(data.expires_at);
+      const now = new Date();
+      
+      if (expiresAt < now) {
+        // Token expirado, mas ainda pode ser renovado com refresh_token
+        return res.status(200).json({ 
+          status: 'connected',
+          message: 'Token expired but can be refreshed',
+          expired: true
+        });
+      }
+    }
+
+    // Retorna o status armazenado no banco
+    const storedStatus = (data.status || '').toLowerCase();
+    
+    if (storedStatus === 'connected' || storedStatus === 'active') {
+      return res.status(200).json({ 
+        status: 'connected',
+        message: 'Authentication active'
+      });
+    }
+
+    if (storedStatus === 'error' || storedStatus === 'failed') {
+      return res.status(200).json({ 
+        status: 'error',
+        message: 'Authentication failed or revoked'
+      });
+    }
+
+    // Default para pending
+    return res.status(200).json({ 
+      status: 'pending',
+      message: 'Authentication in progress'
+    });
+
   } catch (e: any) {
-    return res.status(500).json({ error: 'internal_error', message: e?.message || String(e) });
+    console.error('[ifood-auth/status] Exception:', e);
+    return res.status(500).json({ 
+      status: 'error',
+      message: 'Internal server error',
+      error: e.message 
+    });
   }
 }
