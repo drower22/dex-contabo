@@ -79,11 +79,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const merchantId = account.ifood_merchant_id;
 
     // Chama API iFood para antecipações
-    const url = `${IFOOD_BASE_URL}/financial/v3/anticipations?merchantId=${merchantId}&from=${from}&to=${to}`;
+    // Endpoint correto: /financial/v3.0/merchants/{merchantId}/anticipations
+    const url = `${IFOOD_BASE_URL}/financial/v3.0/merchants/${merchantId}/anticipations?beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
     const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
+        'accept': 'application/json',
       },
     });
 

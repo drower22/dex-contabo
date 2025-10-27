@@ -122,7 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const settlementsResponse = await fetch(settlementsUrl, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
+        'accept': 'application/json',
       },
     });
 
@@ -133,20 +133,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       settlements = settlementsData.settlements || settlementsData.data || [];
     }
 
-    // 4. Busca antecipações da API iFood (Financial v3)
-    // Nota: endpoint real pode variar, ajustar conforme documentação
-    const anticipationsUrl = `${IFOOD_BASE_URL}/financial/v3/anticipations?merchantId=${merchantId}&from=${from}&to=${to}`;
+    // 4. Busca antecipações da API iFood (Financial v3.0)
+    // Endpoint correto: /financial/v3.0/merchants/{merchantId}/anticipations
+    const anticipationsUrl = `${IFOOD_BASE_URL}/financial/v3.0/merchants/${merchantId}/anticipations?beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
     const anticipationsResponse = await fetch(anticipationsUrl, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
+        'accept': 'application/json',
       },
     });
 
     let anticipations: Anticipation[] = [];
     if (anticipationsResponse.ok) {
       const anticipationsData = await anticipationsResponse.json();
-      anticipations = anticipationsData.anticipations || anticipationsData.data || [];
+      // A estrutura real retorna settlements com closingItems do tipo REPASSE_ANTECIPADO_SEMANAL
+      const anticipationSettlements = anticipationsData.settlements || [];
+      
+      // Processa os closingItems de antecipação
+      for (const settlement of anticipationSettlements) {
+        const items = settlement.closingItems || [];
+        for (const item of items) {
+          if (item.type && item.type.includes('ANTECIPADO')) {
+            anticipations.push({
+              id: `${settlement.startDateCalculation}_${settlement.endDateCalculation}_${item.anticipatedPaymentDate}`,
+              anticipatedPayoutDate: item.anticipatedPaymentDate,
+              grossAmount: Math.round((item.originalPaymentAmount || 0) * 100), // Converter para centavos
+              feeAmount: Math.round((item.feeAmount || 0) * 100),
+              netAmount: Math.round((item.anticipatedPaymentAmount || 0) * 100),
+              status: item.status || 'UNKNOWN',
+              settlementIds: [], // iFood não retorna vínculo explícito
+            });
+          }
+        }
+      }
     }
 
     // 5. Mescla settlements e antecipações
