@@ -1,14 +1,12 @@
 /**
  * @file api/ifood/financial/payouts.ts
- * @description Endpoint que retorna payouts unificados (settlements + antecipações)
+ * @description Endpoint que retorna dados brutos de settlements e antecipações
  * 
  * GET /api/ifood/financial/payouts?accountId=...&from=...&to=...
  * 
- * Lógica:
- * 1. Busca settlements no período via API iFood
- * 2. Busca antecipações no período via API iFood
- * 3. Mescla os dados priorizando antecipações quando existirem
- * 4. Retorna payouts unificados com summary
+ * Retorna o JSON completo das duas APIs:
+ * - settlements: dados da API de settlements
+ * - anticipations: dados da API de antecipações
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -20,37 +18,6 @@ const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-interface Settlement {
-  id: string;
-  scheduledPayoutDate: string;
-  grossAmount: number;
-  feeAmount: number;
-  netAmount: number;
-  status: string;
-}
-
-interface Anticipation {
-  id: string;
-  anticipatedPayoutDate: string;
-  grossAmount: number;
-  feeAmount: number;
-  netAmount: number;
-  status: string;
-  settlementIds?: string[];
-}
-
-interface UnifiedPayout {
-  payoutDate: string;
-  origin: 'settlement' | 'anticipation';
-  settlementId?: string;
-  anticipationId?: string;
-  grossAmount: number;
-  feeAmount: number;
-  netAmount: number;
-  status: string;
-  isAnticipated: boolean;
-}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
@@ -126,15 +93,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
 
-    let settlements: Settlement[] = [];
+    let settlementsData = null;
     if (settlementsResponse.ok) {
-      const settlementsData = await settlementsResponse.json();
-      // Extrair settlements do payload (ajustar conforme estrutura real da API)
-      settlements = settlementsData.settlements || settlementsData.data || [];
+      settlementsData = await settlementsResponse.json();
     }
 
     // 4. Busca antecipações da API iFood (Financial v3.0)
-    // Endpoint correto: /financial/v3.0/merchants/{merchantId}/anticipations
     const anticipationsUrl = `${IFOOD_BASE_URL}/financial/v3.0/merchants/${merchantId}/anticipations?beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
     const anticipationsResponse = await fetch(anticipationsUrl, {
       headers: {
@@ -143,90 +107,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
 
-    let anticipations: Anticipation[] = [];
+    let anticipationsData = null;
     if (anticipationsResponse.ok) {
-      const anticipationsData = await anticipationsResponse.json();
-      // A estrutura real retorna settlements com closingItems do tipo REPASSE_ANTECIPADO_SEMANAL
-      const anticipationSettlements = anticipationsData.settlements || [];
-      
-      // Processa os closingItems de antecipação
-      for (const settlement of anticipationSettlements) {
-        const items = settlement.closingItems || [];
-        for (const item of items) {
-          if (item.type && item.type.includes('ANTECIPADO')) {
-            anticipations.push({
-              id: `${settlement.startDateCalculation}_${settlement.endDateCalculation}_${item.anticipatedPaymentDate}`,
-              anticipatedPayoutDate: item.anticipatedPaymentDate,
-              grossAmount: Math.round((item.originalPaymentAmount || 0) * 100), // Converter para centavos
-              feeAmount: Math.round((item.feeAmount || 0) * 100),
-              netAmount: Math.round((item.anticipatedPaymentAmount || 0) * 100),
-              status: item.status || 'UNKNOWN',
-              settlementIds: [], // iFood não retorna vínculo explícito
-            });
-          }
-        }
-      }
+      anticipationsData = await anticipationsResponse.json();
     }
 
-    // 5. Mescla settlements e antecipações
-    const payouts: UnifiedPayout[] = [];
-    const processedSettlementIds = new Set<string>();
-
-    // Adiciona antecipações primeiro (prioridade)
-    for (const ant of anticipations) {
-      payouts.push({
-        payoutDate: ant.anticipatedPayoutDate,
-        origin: 'anticipation',
-        anticipationId: ant.id,
-        settlementId: ant.settlementIds?.[0], // Se houver vínculo
-        grossAmount: ant.grossAmount,
-        feeAmount: ant.feeAmount,
-        netAmount: ant.netAmount,
-        status: ant.status,
-        isAnticipated: true,
-      });
-
-      // Marca settlements relacionados como processados
-      if (ant.settlementIds) {
-        ant.settlementIds.forEach(id => processedSettlementIds.add(id));
-      }
-    }
-
-    // Adiciona settlements que não foram antecipados
-    for (const settlement of settlements) {
-      if (!processedSettlementIds.has(settlement.id)) {
-        payouts.push({
-          payoutDate: settlement.scheduledPayoutDate,
-          origin: 'settlement',
-          settlementId: settlement.id,
-          grossAmount: settlement.grossAmount,
-          feeAmount: settlement.feeAmount,
-          netAmount: settlement.netAmount,
-          status: settlement.status,
-          isAnticipated: false,
-        });
-      }
-    }
-
-    // Ordena por data de payout
-    payouts.sort((a, b) => a.payoutDate.localeCompare(b.payoutDate));
-
-    // 6. Calcula summary
-    const summary = {
-      totalGross: payouts.reduce((sum, p) => sum + p.grossAmount, 0),
-      totalFees: payouts.reduce((sum, p) => sum + p.feeAmount, 0),
-      totalNet: payouts.reduce((sum, p) => sum + p.netAmount, 0),
-      anticipatedCount: payouts.filter(p => p.origin === 'anticipation').length,
-      settlementCount: payouts.filter(p => p.origin === 'settlement').length,
-    };
-
-    // 7. Retorna resposta
+    // 5. Retorna os dados brutos das duas APIs
     return res.status(200).json({
       accountId,
       from,
       to,
-      payouts,
-      summary,
+      settlements: settlementsData,
+      anticipations: anticipationsData,
     });
 
   } catch (e: any) {
