@@ -357,15 +357,19 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
 
     logger.log('info', f"[DEBUG] Colunas a serem salvas: {df.columns.tolist()} (total registros={len(df)})")
     records_to_insert = []
-    for rec in df.to_dict(orient='records'):
+    for idx, rec in enumerate(df.to_dict(orient='records')):
         sanitized = _sanitize_record(rec)
         # Usar apenas NATURAL_KEY_COLUMNS para calcular o hash (garante unicidade correta)
         dedupe_basis = {k: sanitized.get(k) for k in NATURAL_KEY_COLUMNS if k in sanitized}
+        # Adicionar índice da linha para garantir unicidade absoluta (evita duplicatas de linhas 100% idênticas)
+        dedupe_basis['_row_index'] = idx
         base_payload = json.dumps(dedupe_basis, ensure_ascii=False, sort_keys=True, default=str)
         deterministic_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{account_id}|{base_payload}")
         sanitized['id'] = str(deterministic_id)
-        # Calcular natural_hash para auditoria (MD5 do payload)
-        sanitized['natural_hash'] = hashlib.md5(base_payload.encode('utf-8')).hexdigest()
+        # Calcular natural_hash para auditoria (MD5 do payload SEM row_index)
+        natural_basis = {k: sanitized.get(k) for k in NATURAL_KEY_COLUMNS if k in sanitized}
+        natural_payload = json.dumps(natural_basis, ensure_ascii=False, sort_keys=True, default=str)
+        sanitized['natural_hash'] = hashlib.md5(natural_payload.encode('utf-8')).hexdigest()
         records_to_insert.append(sanitized)
 
     seen_ids: set[str] = set()
