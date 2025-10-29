@@ -69,6 +69,8 @@ NATURAL_KEY_COLUMNS = [
     'event_date',
     'transaction_type',
     'transaction_description',
+    'gross_value',  # Adicionado para diferenciar lançamentos com mesma descrição mas valores diferentes
+    'transaction_value',  # Adicionado para diferenciar pelo saldo acumulado
     'ifood_order_id',
     'external_order_id',
     'store_id',
