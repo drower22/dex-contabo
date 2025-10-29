@@ -357,10 +357,13 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
     records_to_insert = []
     for rec in df.to_dict(orient='records'):
         sanitized = _sanitize_record(rec)
-        dedupe_basis = {k: sanitized.get(k) for k in sanitized.keys() if k not in DEDUPE_IGNORE_KEYS}
+        # Usar apenas NATURAL_KEY_COLUMNS para calcular o hash (garante unicidade correta)
+        dedupe_basis = {k: sanitized.get(k) for k in NATURAL_KEY_COLUMNS if k in sanitized}
         base_payload = json.dumps(dedupe_basis, ensure_ascii=False, sort_keys=True, default=str)
         deterministic_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{account_id}|{base_payload}")
         sanitized['id'] = str(deterministic_id)
+        # Calcular natural_hash para auditoria (MD5 do payload)
+        sanitized['natural_hash'] = hashlib.md5(base_payload.encode('utf-8')).hexdigest()
         records_to_insert.append(sanitized)
 
     seen_ids: set[str] = set()
