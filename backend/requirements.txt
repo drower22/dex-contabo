@@ -11,6 +11,7 @@ pydantic-settings
 aiofiles
 sqlglot>=23.0.0
 psycopg[binary]>=3.1.18
+cryptography>=41.0.0
 # Optional LLM providers (uncomment if keys configured)
 groq>=0.9.0
 google-generativeai>=0.7.0

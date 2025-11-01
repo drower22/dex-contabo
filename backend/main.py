@@ -22,12 +22,14 @@ try:
     from backend.dex.api.routers import forms as forms_router
     from backend.dex.api.routers import whatsapp_webhook as wa_webhook_router
     from backend.dex.api.routers import ifood_financial as ifood_financial_router
+    from backend.dex.api.routers import ifood_auth as ifood_auth_router
 except ModuleNotFoundError:
     # Fallback quando o pacote raiz 'backend' não está no PYTHONPATH
     from dex.api.routers import health as health_router
     from dex.api.routers import forms as forms_router
     from dex.api.routers import whatsapp_webhook as wa_webhook_router
     from dex.api.routers import ifood_financial as ifood_financial_router
+    from dex.api.routers import ifood_auth as ifood_auth_router
 
 # Importa router do SQL Agent (pode não existir em alguns ambientes)
 _SQLAGENT_IMPORT_ERR = None
@@ -156,7 +158,9 @@ app.include_router(health_router.router)
 app.include_router(forms_router.router)
 app.include_router(wa_webhook_router.router)
 app.include_router(ifood_financial_router.router)
+app.include_router(ifood_auth_router.router)
 print("[DEBUG] Router iFood Financial montado: rotas /api/ifood/financial/* habilitadas.")
+print("[DEBUG] Router iFood Auth montado: rotas /api/ifood-auth/* habilitadas.")
 if sqlagent_router:
     app.include_router(sqlagent_router)
     print("[DEBUG] Router do SQLAgent montado: rotas /qa e /v1/sql habilitadas.")
