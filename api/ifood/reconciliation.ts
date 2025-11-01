@@ -1,3 +1,32 @@
+/**
+ * @file dex-contabo/api/ifood/reconciliation.ts
+ * @description Handler para download de relatórios de conciliação do iFood (Contabo deployment)
+ * 
+ * Versão do reconciliation.ts para deployment no Contabo.
+ * Implementa o fluxo completo de obtenção de relatórios de conciliação:
+ * 1. Solicita geração on-demand do relatório (POST)
+ * 2. Faz polling até arquivo estar pronto (GET com retry)
+ * 3. Baixa o arquivo .gz
+ * 4. Descompacta e retorna o CSV
+ * 
+ * QUERY PARAMETERS:
+ * - merchantId (obrigatório): ID do merchant no iFood
+ * - competence (obrigatório): Competência YYYY-MM (ex: 2024-03)
+ *   OU
+ * - year + month: Ano e mês separados
+ * 
+ * HEADERS:
+ * - x-ifood-token ou authorization: Token OAuth2 do iFood
+ * - x-request-homologation: "true" para homologação (opcional)
+ * 
+ * POLLING:
+ * - Máximo de 10 tentativas
+ * - Intervalo de 1.5s entre tentativas
+ * 
+ * @example
+ * GET /api/ifood/reconciliation?merchantId=abc123&competence=2024-03
+ */
+
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import zlib from 'zlib';
 
@@ -11,6 +40,11 @@ const cors = {
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
 const IFOOD_FINANCIAL_V3 = `${IFOOD_BASE_URL}/financial/v3.0`;
 
+/**
+ * Handler principal para conciliação financeira.
+ * @param req - Request com merchantId e competence
+ * @param res - Response com CSV em texto plano
+ */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', cors['Access-Control-Allow-Origin']);

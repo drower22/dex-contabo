@@ -1,14 +1,30 @@
+/**
+ * @file dex-contabo/api/ifood-merchant.js
+ * @description Proxy para API de Merchants do iFood (Contabo deployment - JavaScript)
+ * 
+ * Versão JavaScript do merchant proxy para deployment no Contabo.
+ * Faz proxy de requisições relacionadas a merchants para a API oficial do iFood.
+ * 
+ * ENDPOINTS SUPORTADOS:
+ * - GET /api/ifood-merchant?merchantId=xxx (detalhes básicos)
+ * - GET /api/ifood-merchant?merchantId=xxx&endpoint=status
+ * - GET /api/ifood-merchant?merchantId=xxx&endpoint=opening-hours
+ * - GET /api/ifood-merchant?merchantId=xxx&endpoint=interruptions
+ * 
+ * AUTENTICAÇÃO:
+ * - x-ifood-token ou authorization: Bearer {token}
+ * 
+ * @example
+ * GET /api/ifood-merchant?merchantId=abc123&endpoint=status
+ */
+
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*';
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
 
 /**
- * Proxy unificado para todas as rotas de merchant do iFood
- * Rota: /api/ifood-merchant?merchantId=xxx&endpoint=yyy
- * Exemplos:
- * - /api/ifood-merchant?merchantId=123 (detalhes)
- * - /api/ifood-merchant?merchantId=123&endpoint=status
- * - /api/ifood-merchant?merchantId=123&endpoint=opening-hours
- * - /api/ifood-merchant?merchantId=123&endpoint=interruptions
+ * Handler principal do proxy de merchants (JavaScript).
+ * @param {Object} req - Request com merchantId e endpoint
+ * @param {Object} res - Response do Vercel
  */
 module.exports = async function handler(req, res) {
   // CORS headers

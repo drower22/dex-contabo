@@ -1,9 +1,34 @@
+/**
+ * @file dex-contabo/api/ingest/ifood-reconciliation.ts
+ * @description Handler para ingestão completa de relatórios de conciliação (Contabo deployment)
+ * 
+ * Versão do ifood-reconciliation.ts para deployment no Contabo.
+ * Orquestra o fluxo completo de obtenção e processamento de relatórios:
+ * 1. Autentica com iFood (refresh token)
+ * 2. Solicita geração do relatório (POST on-demand)
+ * 3. Faz polling até arquivo estar pronto
+ * 4. Baixa e descompacta CSV
+ * 5. Salva no Supabase Storage
+ * 6. Dispara processamento assíncrono no backend Python
+ * 
+ * FUNCIONALIDADES:
+ * - POST: Inicia processo completo de ingestão
+ * - GET: Consulta status da última execução
+ * 
+ * TABELAS:
+ * - ifood_conciliation_runs: Registra cada execução
+ * - ifood_conciliation_logs: Logs detalhados
+ * - received_files: Arquivos para processamento
+ * 
+ * @example
+ * POST /api/ingest/ifood-reconciliation
+ * Body: { "merchantId": "abc123", "competence": "2024-03" }
+ */
+
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import zlib from 'zlib';
-
-// Funções de parsing removidas - processamento delegado ao backend estável
 
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const STORAGE_BUCKET = process.env.IFOOD_CONCILIATION_BUCKET ?? 'conciliacao';

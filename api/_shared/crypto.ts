@@ -1,6 +1,24 @@
-// AES-GCM helpers for Node 18+ (Web Crypto) running on Vercel functions
-// Requires ENCRYPTION_KEY as base64 (32 bytes) in the environment
+/**
+ * @file dex-contabo/api/_shared/crypto.ts
+ * @description Utilitários de criptografia AES-GCM para Contabo deployment
+ * 
+ * Versão simplificada do crypto.ts principal, sem JSDoc extenso.
+ * Fornece funções básicas para criptografar/descriptografar tokens.
+ * 
+ * ALGORITMO: AES-GCM (Galois/Counter Mode)
+ * - IV de 12 bytes gerado aleatoriamente
+ * - Chave de 256 bits (32 bytes) em base64
+ * 
+ * REQUISITOS:
+ * - Node.js 18+ (Web Crypto API)
+ * - ENCRYPTION_KEY em base64 (32 bytes)
+ */
 
+/**
+ * Obtém chave de criptografia do ambiente.
+ * @returns Chave como Uint8Array
+ * @throws Se ENCRYPTION_KEY ausente ou inválida
+ */
 function getKeyBytes(): Uint8Array {
   const b64 = process.env.ENCRYPTION_KEY || '';
   if (!b64) throw new Error('Missing ENCRYPTION_KEY');
@@ -11,11 +29,20 @@ function getKeyBytes(): Uint8Array {
   }
 }
 
+/**
+ * Importa chave para Web Crypto API.
+ * @returns Promise com CryptoKey
+ */
 async function importKey() {
   const keyBytes = getKeyBytes();
   return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
+/**
+ * Criptografa string usando AES-GCM.
+ * @param plain - Texto a criptografar
+ * @returns Promise com texto em base64
+ */
 export async function encryptToB64(plain: string): Promise<string> {
   const key = await importKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -27,6 +54,12 @@ export async function encryptToB64(plain: string): Promise<string> {
   return Buffer.from(payload).toString('base64');
 }
 
+/**
+ * Descriptografa string de base64 usando AES-GCM.
+ * @param b64 - Texto criptografado em base64
+ * @returns Promise com texto descriptografado
+ * @throws Se input inválido ou descriptografia falhar
+ */
 export async function decryptFromB64(b64: string): Promise<string> {
   try {
     if (!b64 || typeof b64 !== 'string') {

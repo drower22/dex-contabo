@@ -1,3 +1,19 @@
+/**
+ * @file dex-contabo/api/ifood/reviews/[reviewId]/answers.ts
+ * @description Handler para responder avaliações do iFood (Contabo deployment)
+ * 
+ * Versão do answers.ts para deployment no Contabo.
+ * Permite criar respostas para avaliações de clientes com fallback automático.
+ * 
+ * FUNCIONALIDADE:
+ * - POST: Criar resposta para uma avaliação
+ * - Fallback entre múltiplas URLs (v2, review/v2.0, /answers, /reply)
+ * 
+ * @example
+ * POST /api/ifood/reviews/abc123/answers?merchantId=xyz789
+ * Body: { "text": "Obrigado pelo feedback!" }
+ */
+
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*';

@@ -1,3 +1,18 @@
+/**
+ * @file dex-contabo/api/ifood/reviews.ts
+ * @description Handler para listar avaliações do iFood (Contabo deployment)
+ * 
+ * Versão do reviews.ts para deployment no Contabo.
+ * Retorna lista paginada de avaliações com suporte a filtros.
+ * 
+ * FUNCIONALIDADE:
+ * - GET: Listar avaliações com paginação
+ * - Fallback entre 4 URLs candidatas
+ * 
+ * @example
+ * GET /api/ifood/reviews?merchantId=abc123&rating=5&page=1&size=20
+ */
+
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 

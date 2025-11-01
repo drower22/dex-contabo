@@ -1,6 +1,9 @@
 /**
- * @file api/ifood-auth/status.ts
- * @description Rota serverless que verifica o status da autenticação iFood para uma conta específica.
+ * @file dex-contabo/api/ifood-auth/status.ts
+ * @description Verifica status da autenticação iFood (Contabo deployment)
+ * 
+ * Versão do status.ts para deployment no Contabo.
+ * Rota serverless que verifica o status da autenticação iFood para uma conta específica.
  *
  * Query Parameters:
  * - accountId (obrigatório): ID interno da conta/loja no sistema

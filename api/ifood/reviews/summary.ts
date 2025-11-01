@@ -1,3 +1,18 @@
+/**
+ * @file dex-contabo/api/ifood/reviews/summary.ts
+ * @description Handler para resumo estatístico de avaliações (Contabo deployment)
+ * 
+ * Versão do summary.ts para deployment no Contabo.
+ * Retorna métricas agregadas sobre avaliações de um merchant.
+ * 
+ * FUNCIONALIDADE:
+ * - GET: Obter resumo estatístico (nota média, distribuição, taxa de resposta)
+ * - Fallback entre múltiplas URLs
+ * 
+ * @example
+ * GET /api/ifood/reviews/summary?merchantId=abc123
+ */
+
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*';

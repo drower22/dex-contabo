@@ -1,3 +1,21 @@
+/**
+ * @file dex-contabo/api/ifood/settlements.ts
+ * @description Handler para repasses financeiros do iFood (Contabo deployment)
+ * 
+ * Versão do settlements.ts para deployment no Contabo.
+ * Gerencia consulta e ingestão de dados de repasses financeiros.
+ * 
+ * MODOS DE OPERAÇÃO:
+ * 1. Proxy simples (GET)
+ * 2. Ingestão única (POST com ingest=true)
+ * 3. Ingestão anual (POST com fullYear=true)
+ * 
+ * TABELA: ifood_settlement_items
+ * 
+ * @example
+ * GET /api/ifood/settlements?merchantId=abc&beginPaymentDate=2024-01-01&endPaymentDate=2024-01-31
+ */
+
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';

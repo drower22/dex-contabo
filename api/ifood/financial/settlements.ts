@@ -1,8 +1,25 @@
 /**
- * @file api/ifood/financial/settlements.ts
- * @description Endpoint de debug para listar apenas settlements
+ * @file dex-contabo/api/ifood/financial/settlements.ts
+ * @description Endpoint para listar settlements do iFood (Contabo deployment)
  * 
- * GET /api/ifood/financial/settlements?accountId=...&from=...&to=...
+ * Retorna apenas dados de settlements (repasses regulares).
+ * Endpoint de debug/desenvolvimento para testar integração isolada.
+ * 
+ * FUNCIONALIDADE:
+ * - GET: Lista settlements para período específico
+ * - Busca token do Supabase ou aceita via header
+ * 
+ * QUERY PARAMETERS:
+ * - accountId (obrigatório): ID interno da conta
+ * - from (obrigatório): Data inicial (YYYY-MM-DD)
+ * - to (obrigatório): Data final (YYYY-MM-DD)
+ * 
+ * API DO IFOOD:
+ * - GET /financial/v3/settlements
+ * - Parâmetros: merchantId, beginPaymentDate, endPaymentDate
+ * 
+ * @example
+ * GET /api/ifood/financial/settlements?accountId=abc-123&from=2024-01-01&to=2024-01-31
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';

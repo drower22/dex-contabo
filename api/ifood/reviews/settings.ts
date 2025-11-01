@@ -1,3 +1,20 @@
+/**
+ * @file dex-contabo/api/ifood/reviews/settings.ts
+ * @description Handler para configurações de resposta automática (Contabo deployment)
+ * 
+ * Versão do settings.ts para deployment no Contabo.
+ * Gerencia configurações do sistema de respostas automáticas para avaliações.
+ * 
+ * FUNCIONALIDADE:
+ * - GET: Obter configurações de uma loja
+ * - POST/PUT: Criar ou atualizar configurações
+ * 
+ * TABELA: ifood_reviews_settings
+ * 
+ * @example
+ * GET /api/ifood/reviews/settings?storeId=123
+ */
+
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 

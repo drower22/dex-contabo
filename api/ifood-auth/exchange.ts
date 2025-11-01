@@ -1,6 +1,9 @@
 /**
- * @file api/ifood-auth/exchange.ts
- * @description Rota serverless que troca `authorizationCode + authorizationCodeVerifier` por tokens
+ * @file dex-contabo/api/ifood-auth/exchange.ts
+ * @description Troca authorizationCode por tokens (Contabo deployment)
+ * 
+ * Versão do exchange.ts para deployment no Contabo.
+ * Troca `authorizationCode + authorizationCodeVerifier` por tokens
  * (access/refresh) no fluxo de autenticação distribuída do iFood.
  *
  * Separação de clientes (dois apps homologados):

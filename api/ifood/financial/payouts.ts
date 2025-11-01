@@ -1,12 +1,41 @@
 /**
- * @file api/ifood/financial/payouts.ts
- * @description Endpoint que retorna dados brutos de settlements e antecipações
+ * @file dex-contabo/api/ifood/financial/payouts.ts
+ * @description Endpoint unificado para settlements e antecipações (Contabo deployment)
  * 
- * GET /api/ifood/financial/payouts?accountId=...&from=...&to=...
+ * Este endpoint busca dados financeiros de duas fontes da API do iFood:
+ * 1. Settlements (repasses regulares)
+ * 2. Anticipations (antecipações de recebíveis)
  * 
- * Retorna o JSON completo das duas APIs:
- * - settlements: dados da API de settlements
- * - anticipations: dados da API de antecipações
+ * FUNCIONALIDADE:
+ * - GET: Retorna dados brutos das duas APIs em um único response
+ * - Busca token automaticamente do Supabase (scope: financial)
+ * - Suporta token via Authorization header (opcional)
+ * 
+ * QUERY PARAMETERS:
+ * - accountId (obrigatório): ID interno da conta
+ * - from (obrigatório): Data inicial (YYYY-MM-DD)
+ * - to (obrigatório): Data final (YYYY-MM-DD)
+ * 
+ * HEADERS (opcional):
+ * - Authorization: Bearer {token} - Se não fornecido, busca do Supabase
+ * 
+ * RESPONSE:
+ * ```json
+ * {
+ *   "accountId": "abc-123",
+ *   "from": "2024-01-01",
+ *   "to": "2024-01-31",
+ *   "settlements": { ... },
+ *   "anticipations": { ... }
+ * }
+ * ```
+ * 
+ * APIs DO IFOOD CHAMADAS:
+ * - GET /financial/v3/settlements?merchantId=...&beginPaymentDate=...&endPaymentDate=...
+ * - GET /financial/v3.0/merchants/{merchantId}/anticipations?beginAnticipatedPaymentDate=...&endAnticipatedPaymentDate=...
+ * 
+ * @example
+ * GET /api/ifood/financial/payouts?accountId=abc-123&from=2024-01-01&to=2024-01-31
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';

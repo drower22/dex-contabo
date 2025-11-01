@@ -1,6 +1,9 @@
 /**
- * @file api/ifood-auth/link.ts
- * @description Rota serverless responsável por SOLICITAR o `userCode` (código de vínculo) do fluxo de autenticação distribuída.
+ * @file dex-contabo/api/ifood-auth/link.ts
+ * @description Gera userCode para vínculo OAuth (Contabo deployment)
+ * 
+ * Versão do link.ts para deployment no Contabo.
+ * Rota serverless responsável por SOLICITAR o `userCode` (código de vínculo) do fluxo de autenticação distribuída.
  *
  * Contexto de credenciais (dois apps):
  * - Ambiente possui dois clientes distintos no iFood: (1) merchant+reviews e (2) merchant+financial.

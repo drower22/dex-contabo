@@ -1,3 +1,18 @@
+/**
+ * @file dex-contabo/api/ifood/reviews/[reviewId].ts
+ * @description Handler para obter detalhes de avaliação específica (Contabo deployment)
+ * 
+ * Versão do [reviewId].ts para deployment no Contabo.
+ * Retorna informações detalhadas de uma avaliação individual.
+ * 
+ * FUNCIONALIDADE:
+ * - GET: Obter detalhes completos de uma avaliação
+ * - Fallback entre v2 e review/v2.0
+ * 
+ * @example
+ * GET /api/ifood/reviews/abc123?merchantId=xyz789
+ */
+
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*';

@@ -1,6 +1,9 @@
 /**
- * @file api/ifood-auth/refresh.ts
- * @description Rota serverless para RENOVAR o access_token no fluxo distribuído do iFood usando refresh_token.
+ * @file dex-contabo/api/ifood-auth/refresh.ts
+ * @description Renova tokens usando refreshToken (Contabo deployment)
+ * 
+ * Versão do refresh.ts para deployment no Contabo.
+ * Rota serverless para RENOVAR o access_token no fluxo distribuído do iFood usando refresh_token.
  *
  * Como funciona:
  * - Entrada: `storeId` RECEBE o merchant_id do iFood (id da loja no iFood).
