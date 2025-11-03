@@ -92,6 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const headers: Record<string, string> = {
       'Accept': 'application/json',
       'Authorization': `Bearer ${token}`,
+      'User-Agent': process.env.USER_AGENT || 'Dex/1.0',
     };
     if (method !== 'GET' && method !== 'HEAD') {
       headers['Content-Type'] = req.headers['content-type'] as string || 'application/json';

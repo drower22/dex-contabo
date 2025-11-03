@@ -97,17 +97,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       accessToken = await decryptFromB64(data.access_token);
     } catch (decryptError) {
       console.error('[ifood-auth/status] Failed to decrypt token:', decryptError);
-      // Persistir erro de descriptografia
+      // Persistir como pending para não violar constraints e sinalizar re-vínculo/refresh
       try {
         await supabase
           .from('ifood_store_auth')
-          .update({ status: 'error' })
+          .update({ status: 'pending' })
           .eq('account_id', String(accountId))
           .eq('scope', String(scope));
       } catch {}
       return res.status(200).json({ 
-        status: 'error',
-        message: 'Failed to decrypt access token'
+        status: 'pending',
+        message: 'Token encrypted with legacy scheme or invalid. Please re-link.'
       });
     }
 
@@ -118,6 +118,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': process.env.USER_AGENT || 'Dex/1.0',
         },
       });
 
@@ -141,16 +143,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Token inválido ou expirado
       if (ifoodResponse.status === 401 || ifoodResponse.status === 403) {
-        // Persistir erro (expirado/revogado)
+        // Persistir pending (expirado/revogado)
         try {
           await supabase
             .from('ifood_store_auth')
-            .update({ status: 'error' })
+            .update({ status: 'pending' })
             .eq('account_id', String(accountId))
             .eq('scope', String(scope));
         } catch {}
         return res.status(200).json({ 
-          status: 'error',
+          status: 'pending',
           message: 'Token expired or revoked. Please reconnect.',
           httpStatus: ifoodResponse.status
         });
