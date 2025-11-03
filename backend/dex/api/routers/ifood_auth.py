@@ -37,7 +37,7 @@ if not all([SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ENCRYPTION_KEY]):
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 fernet = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
 
-router = APIRouter(prefix="/ifood-auth", tags=["iFood Auth"])
+router = APIRouter(prefix="/api/ifood-auth", tags=["iFood Auth"])
 
 # Modelos Pydantic
 class LinkRequest(BaseModel):
