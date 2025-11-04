@@ -3,12 +3,15 @@ module.exports = {
   apps: [
     {
       name: 'dex-api',
-      script: './api/server.js',
+      script: './api/server.ts',
+      interpreter: 'node',
+      interpreter_args: '-r ts-node/register',
       instances: 2,
       exec_mode: 'cluster',
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
+        TS_NODE_PROJECT: './tsconfig.json',
       },
       error_file: './logs/err.log',
       out_file: './logs/out.log',
