@@ -94,9 +94,9 @@ app.post('/api/ifood-auth/refresh', (req, res) => {
   res.status(501).json({ error: 'Not implemented - TypeScript compilation needed' });
 });
 
-app.get('/api/ifood-auth/status', (req, res) => {
-  res.status(501).json({ error: 'Not implemented - TypeScript compilation needed' });
-});
+// Carregar handler de status
+const statusHandler = require('./ifood-auth/status.js');
+app.get('/api/ifood-auth/status', statusHandler);
 
 // 404
 app.use((req, res) => {
