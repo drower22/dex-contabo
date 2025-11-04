@@ -3,7 +3,7 @@ module.exports = {
   apps: [
     {
       name: 'dex-api',
-      script: './api/index.js',
+      script: './api/server.js',
       instances: 2,
       exec_mode: 'cluster',
       env: {
