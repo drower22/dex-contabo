@@ -31,40 +31,30 @@ jobs:
           port: 22
           script: |
             set -e
-            # Preparar diretório do app (como usuário dex)
+            # Deploy como usuário dex (tudo em um único bloco)
             sudo -u dex bash << 'EOF'
             set -e
             APP_DIR=/home/dex/dex-app
+            
+            # 1. Atualizar código
             if [ ! -d "$APP_DIR/.git" ]; then
               git clone --branch main git@github.com:drower22/dex-contabo.git "$APP_DIR"
             fi
             cd "$APP_DIR"
             git fetch --all
             git reset --hard origin/main
-            # Instalar dependências Node
-            if command -v npm >/dev/null 2>&1; then
-              npm ci || npm install
-            fi
-            EOF
-
-            # Garantir PM2 e ts-node instalados globalmente
-            if ! command -v pm2 >/dev/null 2>&1; then
-              sudo npm i -g pm2
-            fi
-            if ! node -p "try{require.resolve('ts-node');console.log('ok')}catch(e){process.exit(1)}" >/dev/null 2>&1; then
-              sudo npm i -g ts-node
-            fi
-
-            # Reiniciar app via PM2 como usuário dex
-            sudo -u dex bash << 'EOF'
-            set -e
-            APP_DIR=/home/dex/dex-app
-            cd "$APP_DIR"
-            pm2 delete dex-api || true
+            
+            # 2. Instalar dependências (npm install para atualizar lock file)
+            npm install
+            
+            # 3. Reiniciar PM2 (assumindo que pm2 já está instalado no sistema)
+            pm2 delete dex-api 2>/dev/null || true
             pm2 start ecosystem.config.js
             pm2 save
-            pm2 status || true
+            
+            echo "✅ Deploy concluído!"
+            pm2 status
             EOF
-
-            # Recarregar Nginx (proxy)
-            sudo systemctl reload nginx || true
+            
+            # Recarregar Nginx (como root)
+            sudo systemctl reload nginx 2>/dev/null || true
