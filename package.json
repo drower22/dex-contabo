@@ -3,16 +3,33 @@
   "version": "1.0.0",
   "description": "Backend API for Dex platform",
   "private": true,
+  "main": "index.js",
   "scripts": {
     "dev": "vercel dev",
-    "build": "vercel build"
+    "build": "vercel build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint api/**/*.ts tests/**/*.ts"
   },
+  "keywords": ["ifood", "api", "typescript", "vercel"],
+  "author": "Dex Team",
+  "license": "ISC",
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
-    "@vercel/node": "^3.0.0"
+    "@supabase/supabase-js": "^2.39.7",
+    "@vercel/node": "^3.0.0",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
-    "typescript": "^5.3.0"
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vitest/ui": "^1.0.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0",
+    "@vitest/coverage-v8": "^1.0.0"
   }
 }
