@@ -22,7 +22,7 @@ jobs:
           script: |
             echo "SSH OK on $(hostname)"
 
-      - name: Remote deploy
+      - name: Remote deploy (Node + PM2 + ts-node)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -31,28 +31,40 @@ jobs:
           port: 22
           script: |
             set -e
-            # Executar comandos git como usuário dex
+            # Preparar diretório do app (como usuário dex)
             sudo -u dex bash << 'EOF'
-            cd /home/dex/dex-app || exit 1
-            if [ ! -d .git ]; then
-              git clone --branch main git@github.com:drower22/dex-contabo.git /home/dex/dex-app
-              cd /home/dex/dex-app
+            set -e
+            APP_DIR=/home/dex/dex-app
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone --branch main git@github.com:drower22/dex-contabo.git "$APP_DIR"
             fi
+            cd "$APP_DIR"
             git fetch --all
             git reset --hard origin/main
-            if [ ! -d .venv ]; then
-              python3 -m venv .venv
+            # Instalar dependências Node
+            if command -v npm >/dev/null 2>&1; then
+              npm ci || npm install
             fi
-            source .venv/bin/activate
-            python -m pip install -U pip
-            if [ -f requirements.txt ]; then
-              pip install -r requirements.txt
-            elif [ -f backend/requirements.txt ]; then
-              pip install -r backend/requirements.txt
-            fi
-            deactivate
             EOF
-            # Reiniciar serviços como root
-            sudo systemctl restart dex-api
+
+            # Garantir PM2 e ts-node instalados globalmente
+            if ! command -v pm2 >/dev/null 2>&1; then
+              sudo npm i -g pm2
+            fi
+            if ! node -p "try{require.resolve('ts-node');console.log('ok')}catch(e){process.exit(1)}" >/dev/null 2>&1; then
+              sudo npm i -g ts-node
+            fi
+
+            # Reiniciar app via PM2 como usuário dex
+            sudo -u dex bash << 'EOF'
+            set -e
+            APP_DIR=/home/dex/dex-app
+            cd "$APP_DIR"
+            pm2 delete dex-api || true
+            pm2 start ecosystem.config.js
+            pm2 save
+            pm2 status || true
+            EOF
+
+            # Recarregar Nginx (proxy)
             sudo systemctl reload nginx || true
-            systemctl status dex-api --no-pager -n 10 || true
