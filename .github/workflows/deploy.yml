@@ -53,7 +53,7 @@ jobs:
             git reset --hard origin/main
             
             # 2. Limpar e reinstalar dependências (corrige permissões)
-            rm -rf node_modules package-lock.json
+            sudo rm -rf node_modules package-lock.json
             npm install
             
             # 3. Verificar se é migração para JavaScript
