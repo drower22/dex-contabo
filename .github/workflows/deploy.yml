@@ -22,7 +22,7 @@ jobs:
           script: |
             echo "SSH OK on $(hostname)"
 
-      - name: Remote deploy (Node + PM2 - JavaScript Puro)
+      - name: Remote deploy (Node + PM2 + TypeScript)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -31,181 +31,30 @@ jobs:
           port: 22
           script: |
             set -e
-            APP_DIR=/home/dex/dex-app
-            
-            # 1. Limpar node_modules (verificar se é root ou usar sudo)
-            if [ -d "$APP_DIR/node_modules" ]; then
-              echo "🗑️  Limpando node_modules antigo..."
-              if [ "$(id -u)" -eq 0 ]; then
-                # Já é root, não precisa sudo
-                chown -R root:root "$APP_DIR/node_modules" 2>/dev/null || true
-                rm -rf "$APP_DIR/node_modules" "$APP_DIR/package-lock.json"
-              else
-                # Não é root, usar sudo
-                sudo chown -R root:root "$APP_DIR/node_modules" 2>/dev/null || true
-                sudo rm -rf "$APP_DIR/node_modules" "$APP_DIR/package-lock.json"
-              fi
-              echo "✅ node_modules removido"
-            fi
-            
-            # 2. Deploy como usuário dex
-            if [ "$(id -u)" -eq 0 ]; then
-              # Se for root, usar su ao invés de sudo
-              su - dex -c 'bash -s' << 'EOF'
+            # Deploy como usuário dex (tudo em um único bloco)
+            sudo -u dex bash << 'EOF'
             set -e
             APP_DIR=/home/dex/dex-app
             
-            # Atualizar código
+            # 1. Atualizar código
             if [ ! -d "$APP_DIR/.git" ]; then
               git clone --branch main git@github.com:drower22/dex-contabo.git "$APP_DIR"
             fi
             cd "$APP_DIR"
-            
-            # Backup antes de atualizar
-            BACKUP_DIR="backup_pre_deploy_$(date +%Y%m%d_%H%M%S)"
-            mkdir -p "$BACKUP_DIR"
-            cp -r api "$BACKUP_DIR/" 2>/dev/null || true
-            cp ecosystem.config.js "$BACKUP_DIR/" 2>/dev/null || true
-            echo "✅ Backup criado em: $BACKUP_DIR"
-            
             git fetch --all
             git reset --hard origin/main
             
-            # Instalar dependências (node_modules já foi limpo como root)
+            # 2. Instalar dependências
             npm install
             
-            # 3. Verificar se é migração para JavaScript
-            if [ -f "api/server-node.js" ] && [ ! -f "api/server.js" ]; then
-              echo "🔄 Detectada migração para JavaScript..."
-              
-              # Renomear server-node.js para server.js se necessário
-              if [ ! -f "api/server.js" ]; then
-                cp api/server-node.js api/server.js
-                echo "✅ server.js criado"
-              fi
-              
-              # Atualizar ecosystem.config.js se ainda estiver usando ts-node
-              if grep -q "ts-node/register" ecosystem.config.js; then
-                echo "⚠️  ecosystem.config.js ainda usa ts-node, atualizando..."
-                sed -i "s|./api/server.ts|./api/server.js|g" ecosystem.config.js
-                sed -i "/interpreter_args.*ts-node/d" ecosystem.config.js
-                sed -i "/TS_NODE_PROJECT/d" ecosystem.config.js
-                echo "✅ ecosystem.config.js atualizado para JavaScript"
-              fi
-            fi
-            
-            # 4. Reiniciar PM2
+            # 3. Reiniciar PM2
             pm2 delete dex-api 2>/dev/null || true
             pm2 start ecosystem.config.js
             pm2 save
             
-            # 5. Aguardar inicialização
-            echo "⏳ Aguardando 5 segundos..."
-            sleep 5
-            
-            # 6. Verificar health check
-            echo "🧪 Testando health check..."
-            HEALTH_STATUS=$(curl -s http://localhost:3000/api/ifood-auth/health | jq -r '.status' 2>/dev/null || echo "error")
-            
-            if [ "$HEALTH_STATUS" = "healthy" ]; then
-              echo "✅ Deploy concluído com sucesso!"
-              pm2 status
-            else
-              echo "❌ Health check falhou: $HEALTH_STATUS"
-              echo "🔄 Tentando rollback..."
-              
-              # Rollback
-              pm2 delete dex-api 2>/dev/null || true
-              if [ -d "$BACKUP_DIR" ]; then
-                cp -r "$BACKUP_DIR/api/"* api/ 2>/dev/null || true
-                cp "$BACKUP_DIR/ecosystem.config.js" . 2>/dev/null || true
-                pm2 start ecosystem.config.js
-                echo "⚠️  Rollback executado. Verifique os logs."
-              fi
-              exit 1
-            fi
+            echo "✅ Deploy concluído!"
+            pm2 status
             EOF
-            else
-              # Não é root, usar sudo
-              sudo -u dex bash << 'EOF'
-            set -e
-            APP_DIR=/home/dex/dex-app
-            
-            # Atualizar código
-            if [ ! -d "$APP_DIR/.git" ]; then
-              git clone --branch main git@github.com:drower22/dex-contabo.git "$APP_DIR"
-            fi
-            cd "$APP_DIR"
-            
-            # Backup antes de atualizar
-            BACKUP_DIR="backup_pre_deploy_$(date +%Y%m%d_%H%M%S)"
-            mkdir -p "$BACKUP_DIR"
-            cp -r api "$BACKUP_DIR/" 2>/dev/null || true
-            cp ecosystem.config.js "$BACKUP_DIR/" 2>/dev/null || true
-            echo "✅ Backup criado em: $BACKUP_DIR"
-            
-            git fetch --all
-            git reset --hard origin/main
-            
-            # Instalar dependências (node_modules já foi limpo como root)
-            npm install
-            
-            # 3. Verificar se é migração para JavaScript
-            if [ -f "api/server-node.js" ] && [ ! -f "api/server.js" ]; then
-              echo "🔄 Detectada migração para JavaScript..."
-              
-              # Renomear server-node.js para server.js se necessário
-              if [ ! -f "api/server.js" ]; then
-                cp api/server-node.js api/server.js
-                echo "✅ server.js criado"
-              fi
-              
-              # Atualizar ecosystem.config.js se ainda estiver usando ts-node
-              if grep -q "ts-node/register" ecosystem.config.js; then
-                echo "⚠️  ecosystem.config.js ainda usa ts-node, atualizando..."
-                sed -i "s|./api/server.ts|./api/server.js|g" ecosystem.config.js
-                sed -i "/interpreter_args.*ts-node/d" ecosystem.config.js
-                sed -i "/TS_NODE_PROJECT/d" ecosystem.config.js
-                echo "✅ ecosystem.config.js atualizado para JavaScript"
-              fi
-            fi
-            
-            # 4. Reiniciar PM2
-            pm2 delete dex-api 2>/dev/null || true
-            pm2 start ecosystem.config.js
-            pm2 save
-            
-            # 5. Aguardar inicialização
-            echo "⏳ Aguardando 5 segundos..."
-            sleep 5
-            
-            # 6. Verificar health check
-            echo "🧪 Testando health check..."
-            HEALTH_STATUS=$(curl -s http://localhost:3000/api/ifood-auth/health | jq -r '.status' 2>/dev/null || echo "error")
-            
-            if [ "$HEALTH_STATUS" = "healthy" ]; then
-              echo "✅ Deploy concluído com sucesso!"
-              pm2 status
-            else
-              echo "❌ Health check falhou: $HEALTH_STATUS"
-              echo "🔄 Tentando rollback..."
-              
-              # Rollback
-              pm2 delete dex-api 2>/dev/null || true
-              if [ -d "$BACKUP_DIR" ]; then
-                cp -r "$BACKUP_DIR/api/"* api/ 2>/dev/null || true
-                cp "$BACKUP_DIR/ecosystem.config.js" . 2>/dev/null || true
-                pm2 start ecosystem.config.js
-                echo "⚠️  Rollback executado. Verifique os logs."
-              fi
-              exit 1
-            fi
-            EOF
-            fi
             
             # Recarregar Nginx (como root)
-            if [ "$(id -u)" -eq 0 ]; then
-              systemctl reload nginx 2>/dev/null || true
-            else
-              sudo systemctl reload nginx 2>/dev/null || true
-            fi
+            sudo systemctl reload nginx 2>/dev/null || true
