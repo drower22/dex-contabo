@@ -33,10 +33,12 @@ jobs:
             set -e
             APP_DIR=/home/dex/dex-app
             
-            # 1. Limpar node_modules com permissões root (como root)
+            # 1. Limpar node_modules (mudar dono para root primeiro)
             if [ -d "$APP_DIR/node_modules" ]; then
               echo "🗑️  Limpando node_modules antigo..."
+              chown -R root:root "$APP_DIR/node_modules" 2>/dev/null || true
               rm -rf "$APP_DIR/node_modules" "$APP_DIR/package-lock.json"
+              echo "✅ node_modules removido"
             fi
             
             # 2. Deploy como usuário dex
