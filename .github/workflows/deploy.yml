@@ -52,7 +52,8 @@ jobs:
             git fetch --all
             git reset --hard origin/main
             
-            # 2. Instalar dependências
+            # 2. Limpar e reinstalar dependências (corrige permissões)
+            rm -rf node_modules package-lock.json
             npm install
             
             # 3. Verificar se é migração para JavaScript
