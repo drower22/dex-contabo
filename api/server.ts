@@ -17,7 +17,15 @@ const PORT = process.env.PORT || 3000;
 
 // Middlewares
 app.use(cors({ 
-  origin: process.env.CORS_ORIGIN || '*', 
+  origin: (origin, callback) => {
+    const raw = (process.env.CORS_ORIGIN || '*').trim();
+    const allowed = raw.split(',').map(s => s.trim());
+    if (allowed.includes('*') || !origin || allowed.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true 
 }));
 app.use(express.json());
@@ -80,49 +88,68 @@ function adaptVercelHandler(handler: (req: any, res: any) => Promise<void>) {
 // Carregar handlers TypeScript
 console.log('🔄 Loading iFood Auth TypeScript handlers...');
 
-try {
-  // Importar handlers TypeScript
-  const healthHandler = require('./ifood-auth/health').default;
-  const linkHandler = require('./ifood-auth/link').default;
-  const exchangeHandler = require('./ifood-auth/exchange').default;
-  const refreshHandler = require('./ifood-auth/refresh').default;
-  const statusHandler = require('./ifood-auth/status').default;
-  
-  // Montar rotas com adapter
+// Helper para carregar handler com fallback
+function loadHandler(modulePath: string) {
+  try {
+    const module = require(modulePath);
+    // Tentar pegar o export default ou o export nomeado
+    return module.default || module;
+  } catch (error: any) {
+    console.error(`❌ Failed to load ${modulePath}:`, error.message);
+    return null;
+  }
+}
+
+// Carregar handlers
+const healthHandler = loadHandler('./ifood-auth/health');
+const linkHandler = loadHandler('./ifood-auth/link');
+const exchangeHandler = loadHandler('./ifood-auth/exchange');
+const refreshHandler = loadHandler('./ifood-auth/refresh');
+const statusHandler = loadHandler('./ifood-auth/status');
+
+// Montar rotas
+if (healthHandler) {
   app.get('/api/ifood-auth/health', adaptVercelHandler(healthHandler));
-  app.post('/api/ifood-auth/link', adaptVercelHandler(linkHandler));
-  app.post('/api/ifood-auth/exchange', adaptVercelHandler(exchangeHandler));
-  app.post('/api/ifood-auth/refresh', adaptVercelHandler(refreshHandler));
-  app.get('/api/ifood-auth/status', adaptVercelHandler(statusHandler));
-  
-  console.log('✅ iFood Auth TypeScript handlers loaded successfully');
-} catch (error: any) {
-  console.error('❌ Error loading TypeScript handlers:', error.message);
-  console.error('Stack:', error.stack);
-  
-  // Fallback: endpoints que retornam erro claro
+  console.log('✅ Health handler loaded');
+} else {
   app.get('/api/ifood-auth/health', (req: Request, res: Response) => {
-    res.status(500).json({ 
-      error: 'Handler not loaded', 
-      details: error.message,
-      hint: 'Check if ts-node is installed and TypeScript files are accessible'
-    });
+    res.status(500).json({ error: 'Health handler not loaded' });
   });
-  
+}
+
+if (linkHandler) {
+  app.post('/api/ifood-auth/link', adaptVercelHandler(linkHandler));
+  console.log('✅ Link handler loaded');
+} else {
   app.post('/api/ifood-auth/link', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Handler not loaded', details: error.message });
+    res.status(500).json({ error: 'Link handler not loaded' });
   });
-  
+}
+
+if (exchangeHandler) {
+  app.post('/api/ifood-auth/exchange', adaptVercelHandler(exchangeHandler));
+  console.log('✅ Exchange handler loaded');
+} else {
   app.post('/api/ifood-auth/exchange', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Handler not loaded', details: error.message });
+    res.status(500).json({ error: 'Exchange handler not loaded' });
   });
-  
+}
+
+if (refreshHandler) {
+  app.post('/api/ifood-auth/refresh', adaptVercelHandler(refreshHandler));
+  console.log('✅ Refresh handler loaded');
+} else {
   app.post('/api/ifood-auth/refresh', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Handler not loaded', details: error.message });
+    res.status(500).json({ error: 'Refresh handler not loaded' });
   });
-  
+}
+
+if (statusHandler) {
+  app.get('/api/ifood-auth/status', adaptVercelHandler(statusHandler));
+  console.log('✅ Status handler loaded');
+} else {
   app.get('/api/ifood-auth/status', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Handler not loaded', details: error.message });
+    res.status(500).json({ error: 'Status handler not loaded' });
   });
 }
 
