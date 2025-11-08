@@ -31,12 +31,20 @@ jobs:
           port: 22
           script: |
             set -e
-            # Deploy como usuário dex (tudo em um único bloco)
+            APP_DIR=/home/dex/dex-app
+            
+            # 1. Limpar node_modules com sudo (resolve permissões)
+            if [ -d "$APP_DIR/node_modules" ]; then
+              echo "🧹 Limpando node_modules antigo..."
+              sudo rm -rf "$APP_DIR/node_modules" "$APP_DIR/package-lock.json"
+            fi
+            
+            # 2. Deploy como usuário dex
             sudo -u dex bash << 'EOF'
             set -e
             APP_DIR=/home/dex/dex-app
             
-            # 1. Atualizar código
+            # Atualizar código
             if [ ! -d "$APP_DIR/.git" ]; then
               git clone --branch main git@github.com:drower22/dex-contabo.git "$APP_DIR"
             fi
@@ -44,8 +52,7 @@ jobs:
             git fetch --all
             git reset --hard origin/main
             
-            # 2. Instalar dependências (limpar node_modules primeiro)
-            rm -rf node_modules package-lock.json
+            # Instalar dependências
             npm install
             
             # 3. Reiniciar PM2 (sem ecosystem.config.js)
