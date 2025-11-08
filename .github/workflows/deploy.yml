@@ -44,7 +44,8 @@ jobs:
             git fetch --all
             git reset --hard origin/main
             
-            # 2. Instalar dependências
+            # 2. Instalar dependências (limpar node_modules primeiro)
+            rm -rf node_modules package-lock.json
             npm install
             
             # 3. Reiniciar PM2 (sem ecosystem.config.js)
