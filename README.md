@@ -1,47 +1,56 @@
-# 🚀 Dex Contabo - Backend Centralizado
+# 🚀 Dex API - Autenticação iFood (Contabo)
 
-Backend completo em **TypeScript** para APIs do iFood + **Python** apenas para processamento pesado de planilhas.
+Backend Node.js/TypeScript para autenticação distribuída do iFood, rodando no Contabo via PM2.
 
-## 📋 Arquitetura
+## 📋 Visão Geral
+
+Esta API gerencia a autenticação OAuth 2.0 com o iFood usando o fluxo distribuído, permitindo que restaurantes vinculem suas contas para acesso a dados de reviews e financeiros.
+
+### ✅ O Que Esta API Faz
+
+- **Autenticação iFood**: Fluxo OAuth completo (link → exchange → refresh)
+- **Gestão de Tokens**: Criptografia AES-GCM para armazenamento seguro
+- **Proxies iFood**: Endpoints para merchant, reviews, settlements, etc
+- **Cron Jobs**: Renovação automática de tokens expirando
+
+### ❌ O Que NÃO Faz
+
+- **Processamento de planilhas**: Está em `/backend-planilhas` (Python separado)
+- **Deploy Vercel**: Removido, 100% Contabo agora
+
+## 🏗️ Arquitetura
 
 ```
-dex-contabo/
-├── api/                          # 🟦 TypeScript - Todas as APIs
-│   ├── _shared/                  # Utilitários compartilhados
-│   │   ├── crypto.ts            # Criptografia AES-GCM
-│   │   ├── discord.ts           # Notificações Discord
-│   │   ├── logger.ts            # Logging estruturado
-│   │   └── retry.ts             # Retry com backoff
-│   ├── ifood-auth/              # Autenticação iFood
-│   │   ├── link.ts              # Solicitar código
-│   │   ├── exchange.ts          # Trocar por tokens
-│   │   ├── refresh.ts           # Renovar tokens
-│   │   ├── status.ts            # Validar status
-│   │   └── health.ts            # Health check
-│   ├── ifood/                   # Proxies iFood
-│   │   ├── merchant.ts
-│   │   ├── reviews.ts
-│   │   ├── settlements.ts
-│   │   └── financial/
-│   └── cron/                    # Jobs automáticos
-│       ├── refresh-tokens.ts    # Renova tokens (6h)
-│       └── health-check.ts      # Monitor (15min)
+api/
+├── _shared/                  # Código compartilhado
+│   ├── config.ts            # Configurações centralizadas
+│   ├── account-resolver.ts  # Resolução de IDs
+│   ├── ifood-client.ts      # Cliente HTTP iFood
+│   ├── enhanced-logger.ts   # Logs estruturados
+│   ├── crypto.ts            # Criptografia AES-GCM
+│   └── retry.ts             # Retry logic
 │
-├── backend/                      # 🐍 Python - Processamento pesado
-│   ├── scripts/
-│   │   ├── process_report.py   # Processa planilhas financeiras
-│   │   └── process_conciliation.py
-│   └── main.py                  # FastAPI (opcional)
+├── ifood-auth/              # Autenticação OAuth
+│   ├── link.ts              # POST - Gerar userCode
+│   ├── exchange.ts          # POST - Trocar código por tokens
+│   ├── refresh.ts           # POST - Renovar tokens
+│   ├── status.ts            # GET - Validar status
+│   └── health.ts            # GET - Health check
 │
-├── tests/                        # 🧪 Testes automatizados
-│   ├── crypto.test.ts
-│   ├── health.test.ts
-│   └── setup.ts
+├── ifood/                   # Proxies para API iFood
+│   ├── merchant.ts          # Dados do merchant
+│   ├── reviews.ts           # Avaliações
+│   ├── settlements.ts       # Repasses
+│   └── reconciliation.ts    # Conciliação
 │
-└── vercel.json                   # Configuração de deploy
+├── cron/                    # Jobs agendados
+│   ├── refresh-tokens.ts    # Renovar tokens expirando
+│   └── health-check.ts      # Monitoramento
+│
+└── server.ts                # Servidor Express
 ```
 
-## ⚡ Quick Start
+## 🚀 Quick Start
 
 ### 1. Instalar Dependências
 
@@ -52,339 +61,250 @@ npm install
 ### 2. Configurar Variáveis de Ambiente
 
 ```bash
-# Copie o template
-cp env.template .env
-
-# Edite e preencha os valores
+cp env.example .env
 nano .env
 ```
 
-**Variáveis obrigatórias:**
+**Variáveis obrigatórias**:
 ```env
 # Supabase
 SUPABASE_URL=https://seibcrrxlyxfqudrrage.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
 
-# iFood
-IFOOD_CLIENT_ID_REVIEWS=...
-IFOOD_CLIENT_SECRET_REVIEWS=...
-IFOOD_CLIENT_ID_FINANCIAL=...
-IFOOD_CLIENT_SECRET_FINANCIAL=...
+# iFood - Reviews
+IFOOD_CLIENT_ID_REVIEWS=seu-client-id
+IFOOD_CLIENT_SECRET_REVIEWS=seu-client-secret
+
+# iFood - Financial
+IFOOD_CLIENT_ID_FINANCIAL=seu-client-id
+IFOOD_CLIENT_SECRET_FINANCIAL=seu-client-secret
 
 # Criptografia (gere com: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
-ENCRYPTION_KEY=...
+ENCRYPTION_KEY=sua-chave-base64
 
-# Discord (para alertas)
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-
-# Cron (gere um secret aleatório)
-CRON_SECRET=...
+# CORS
+CORS_ORIGIN=https://seu-frontend.vercel.app
 ```
 
-### 3. Rodar Localmente
+### 3. Validar Ambiente
 
 ```bash
-# Desenvolvimento
+chmod +x VALIDATE_ENV.sh
+./VALIDATE_ENV.sh
+```
+
+### 4. Rodar Localmente
+
+```bash
 npm run dev
-
-# Testes
-npm test
-
-# Testes com watch
-npm run test:watch
-
-# Coverage
-npm run test:coverage
+# Servidor rodando em http://localhost:3000
 ```
 
-### 4. Deploy no Vercel
+### 5. Testar
 
 ```bash
-# Instalar Vercel CLI
-npm i -g vercel
+# Health check
+curl http://localhost:3000/api/ifood-auth/health
 
-# Deploy
-vercel
-
-# Deploy para produção
-vercel --prod
+# Solicitar userCode
+curl -X POST http://localhost:3000/api/ifood-auth/link \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"reviews","storeId":"seu-account-id"}'
 ```
 
-## 🔐 Autenticação iFood
+## 🔧 Deploy no Contabo
 
-### Fluxo Completo
+### Via GitHub Actions (Automático)
 
-```typescript
-// 1. Solicitar código de vínculo
+```bash
+git add .
+git commit -m "feat: atualização da API"
+git push origin main
+# Deploy automático via .github/workflows/deploy.yml
+```
+
+### Manual
+
+```bash
+ssh dex@seu-servidor
+cd /home/dex/dex-app
+git pull origin main
+npm install
+pm2 restart dex-api
+```
+
+## 📝 Scripts Disponíveis
+
+```bash
+npm run dev              # Rodar localmente
+npm run start:prod       # Rodar em produção
+npm run pm2:start        # Iniciar com PM2
+npm run pm2:restart      # Reiniciar PM2
+npm run pm2:logs         # Ver logs PM2
+npm run pm2:status       # Status PM2
+npm run validate         # Validar ambiente
+npm test                 # Rodar testes
+npm run type-check       # Verificar tipos TypeScript
+```
+
+## 🔐 Fluxo de Autenticação
+
+### 1. Link (Gerar userCode)
+
+```bash
 POST /api/ifood-auth/link
 {
   "scope": "reviews",
   "storeId": "uuid-da-conta"
 }
 
-// 2. Usuário autoriza no Portal do Parceiro
+# Resposta:
+{
+  "userCode": "ABC123",
+  "verificationUrl": "https://portal.ifood.com.br/...",
+  "authorizationCodeVerifier": "verifier_xyz...",
+  "expiresIn": 600
+}
+```
 
-// 3. Trocar código por tokens
+### 2. Autorizar no Portal iFood
+
+Usuário acessa `verificationUrl` e insere `userCode`.
+
+### 3. Exchange (Trocar código por tokens)
+
+```bash
 POST /api/ifood-auth/exchange
 {
   "scope": "reviews",
   "storeId": "uuid-da-conta",
-  "authorizationCode": "ABC123",
-  "authorizationCodeVerifier": "verifier..."
+  "authorizationCode": "codigo-do-portal",
+  "authorizationCodeVerifier": "verifier_xyz..."
 }
 
-// 4. Validar status
+# Resposta:
+{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "expires_in": 3600
+}
+```
+
+### 4. Status (Validar autenticação)
+
+```bash
 GET /api/ifood-auth/status?accountId=uuid&scope=reviews
 
-// 5. Renovar token
+# Resposta:
+{
+  "status": "connected",
+  "message": "Token validated successfully",
+  "merchantId": "merchant-id"
+}
+```
+
+### 5. Refresh (Renovar token)
+
+```bash
 POST /api/ifood-auth/refresh
 {
   "scope": "reviews",
-  "storeId": "merchant-id"
+  "storeId": "uuid-ou-merchant-id"
 }
-```
 
-## 🧪 Testes Automatizados
-
-### Rodar Testes
-
-```bash
-# Todos os testes
-npm test
-
-# Com notificações no Discord
-DISCORD_WEBHOOK_URL=https://... npm test
-
-# Apenas crypto
-npm test crypto
-
-# Apenas health
-npm test health
-
-# UI interativa
-npm run test:ui
-```
-
-### Testes Incluídos
-
-- ✅ **Crypto**: Criptografia/descriptografia
-- ✅ **Health**: Validação de dependências
-- ✅ **Auth Flow**: Fluxo completo de autenticação (manual)
-
-### Notificações no Discord
-
-Todos os testes enviam resultados para o Discord automaticamente:
-
-```
-✅ Teste: Crypto: Encrypt/Decrypt - PASSOU (0.15s)
-❌ Teste: Health Check - FALHOU (2.34s)
-   Detalhes: Supabase connection failed
-```
-
-## 🤖 Automação
-
-### Cron Jobs (Vercel)
-
-#### 1. Renovação de Tokens (a cada 6 horas)
-```
-POST /api/cron/refresh-tokens
-Authorization: Bearer {CRON_SECRET}
-```
-
-Renova automaticamente tokens que expiram em < 1 hora.
-
-#### 2. Health Check (a cada 15 minutos)
-```
-POST /api/cron/health-check
-Authorization: Bearer {CRON_SECRET}
-```
-
-Monitora saúde do sistema e notifica no Discord se houver problemas.
-
-### Configuração no vercel.json
-
-```json
+# Resposta:
 {
-  "crons": [
-    {
-      "path": "/api/cron/refresh-tokens",
-      "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/cron/health-check",
-      "schedule": "*/15 * * * *"
-    }
-  ]
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "expires_in": 3600
 }
 ```
-
-## 📊 Monitoramento
-
-### Health Check
-
-```bash
-curl https://seu-app.vercel.app/api/ifood-auth/health
-```
-
-**Response:**
-```json
-{
-  "status": "healthy",
-  "checks": {
-    "supabase": true,
-    "encryption": true,
-    "ifood_reviews": true,
-    "ifood_financial": true
-  },
-  "timestamp": "2025-01-03T20:00:00.000Z"
-}
-```
-
-### Alertas no Discord
-
-O sistema envia notificações automáticas para:
-
-- 🚨 **Erros**: Falhas em endpoints
-- ⚠️ **Avisos**: Health check falhou, tokens não renovados
-- ✅ **Sucesso**: Deploy, testes passaram
-- 🧪 **Testes**: Resultados de testes automatizados
-
-### Configurar Webhook do Discord
-
-1. No Discord, vá em **Configurações do Servidor** → **Integrações** → **Webhooks**
-2. Clique em **Novo Webhook**
-3. Copie a URL do webhook
-4. Configure no Vercel:
-
-```bash
-vercel env add DISCORD_WEBHOOK_URL
-```
-
-## 🔒 Segurança
-
-### Criptografia
-
-- **Algoritmo**: AES-GCM (256 bits)
-- **IV**: 12 bytes aleatórios por token
-- **Formato**: Base64(IV + ciphertext)
-
-### Boas Práticas
-
-- ✅ Tokens nunca em plaintext
-- ✅ Service role key protegida
-- ✅ CORS configurado
-- ✅ Rate limiting (retry com backoff)
-- ✅ Logs estruturados (JSON)
-- ✅ Validação de entrada
 
 ## 🐛 Troubleshooting
 
 ### Erro: "Missing ENCRYPTION_KEY"
 
 ```bash
-# Gerar chave
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-
-# Configurar no Vercel
-vercel env add ENCRYPTION_KEY
+# Adicione o output ao .env
+echo "ENCRYPTION_KEY=<output>" >> .env
 ```
 
-### Erro: "Decryption failed"
+### Erro: "Account not found"
 
-ENCRYPTION_KEY mudou. Re-autentique todas as contas.
+Verifique se o `storeId` existe na tabela `accounts`:
 
-### Testes falhando localmente
+```sql
+SELECT id, ifood_merchant_id FROM accounts WHERE id = 'seu-uuid';
+```
+
+### Erro: "Failed to decrypt token"
+
+ENCRYPTION_KEY mudou. Solução: Re-autenticar todas as contas.
+
+```sql
+DELETE FROM ifood_store_auth WHERE account_id = 'uuid';
+```
+
+### Ver Logs Detalhados
 
 ```bash
-# Instalar dependências
-npm install
+# No servidor
+pm2 logs dex-api --lines 100
 
-# Verificar .env
-cat .env
-
-# Rodar com logs
-DEBUG=* npm test
+# Erros apenas
+pm2 logs dex-api --err --lines 50
 ```
 
-### Discord não recebe notificações
+## 📚 Documentação Adicional
 
-```bash
-# Testar webhook
-curl -X POST https://discord.com/api/webhooks/... \
-  -H "Content-Type: application/json" \
-  -d '{"content":"Teste"}'
+- **[REFACTORING_GUIDE.md](./REFACTORING_GUIDE.md)** - Guia de refatoração
+- **[ACOES_IMEDIATAS.md](./ACOES_IMEDIATAS.md)** - Resolver problemas de vínculo
+- **[api/ifood-auth/README.md](./api/ifood-auth/README.md)** - Documentação detalhada da autenticação
+- **[VALIDATE_ENV.sh](./VALIDATE_ENV.sh)** - Script de validação
 
-# Verificar variável
-vercel env ls
+## 🔄 Estrutura de Dados (Supabase)
+
+### Tabela: `ifood_store_auth`
+
+```sql
+CREATE TABLE ifood_store_auth (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id TEXT NOT NULL,
+  ifood_merchant_id TEXT,
+  link_code TEXT,
+  verifier TEXT,
+  access_token TEXT,  -- Criptografado
+  refresh_token TEXT, -- Criptografado
+  expires_at TIMESTAMPTZ,
+  status TEXT CHECK (status IN ('pending', 'connected', 'error')),
+  scope TEXT CHECK (scope IN ('reviews', 'financial')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(account_id, scope)
+);
 ```
 
-## 📚 Documentação Completa
+## 🎯 Roadmap
 
-- [Validação do Fluxo iFood](./IFOOD_AUTH_VALIDATION.md)
-- [Script de Teste Bash](./test-ifood-auth.sh)
-- [Queries SQL](./test-ifood-auth.sql)
-- [Docs da API](./api/ifood-auth/README.md)
-
-## 🚀 Deploy
-
-### Vercel (Recomendado)
-
-1. **Conectar repositório**
-   ```bash
-   vercel link
-   ```
-
-2. **Configurar variáveis**
-   ```bash
-   vercel env add SUPABASE_URL
-   vercel env add SUPABASE_SERVICE_ROLE_KEY
-   vercel env add ENCRYPTION_KEY
-   vercel env add DISCORD_WEBHOOK_URL
-   # ... todas as outras
-   ```
-
-3. **Deploy**
-   ```bash
-   vercel --prod
-   ```
-
-### Railway (Alternativa)
-
-1. **Criar novo projeto**
-2. **Conectar repositório GitHub**
-3. **Adicionar variáveis de ambiente**
-4. **Deploy automático**
-
-## 🔄 CI/CD
-
-### GitHub Actions (Exemplo)
-
-```yaml
-name: Tests
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      - run: npm install
-      - run: npm test
-        env:
-          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-```
+- [x] Autenticação OAuth distribuída
+- [x] Criptografia de tokens
+- [x] Renovação automática de tokens
+- [x] Logs estruturados
+- [x] Validação de ambiente
+- [ ] Rate limiting
+- [ ] Circuit breaker
+- [ ] Métricas e monitoramento
+- [ ] Testes E2E
 
 ## 📞 Suporte
 
-- **Documentação iFood**: https://developer.ifood.com.br/support
-- **Equipe Dex**: suporte@usa-dex.com.br
+- **Issues**: GitHub Issues
+- **Email**: suporte@usa-dex.com.br
+- **Documentação iFood**: https://developer.ifood.com.br
 
 ---
 
-**Versão**: 1.0.0  
-**Última atualização**: 2025-01-03
+**Versão**: 2.0.0  
+**Última atualização**: 2025-01-08  
+**Deploy**: Contabo (PM2)

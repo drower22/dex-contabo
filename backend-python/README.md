@@ -1,4 +1,9 @@
-# iFood Sales Concierge – Arquitetura & Guia de Workflows (n8n + WhatsApp + MCP)
+# 📊 Backend Python - Processamento de Planilhas
+
+⚠️ **ATENÇÃO**: Este backend Python é usado APENAS para processamento de planilhas pesadas.
+A autenticação iFood está em `/api` (Node.js/TypeScript).
+
+## iFood Sales Concierge – Arquitetura & Guia de Workflows (n8n + WhatsApp + MCP)
 
 Este projeto automatiza a análise financeira semanal de restaurantes integrados ao iFood, usando WhatsApp como canal principal de interação. Toda a orquestração é feita via n8n, centralizada por um workflow MCP (Master Control Process), que distribui as tarefas para workflows específicos conforme a jornada do usuário.
 

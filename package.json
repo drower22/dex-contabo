@@ -1,18 +1,19 @@
 {
   "name": "dex-backend-contabo",
-  "version": "1.0.0",
-  "description": "Backend API for Dex platform",
+  "version": "2.0.0",
+  "description": "Backend API for Dex platform - Contabo deployment",
   "private": true,
-  "main": "index.js",
+  "main": "api/server.ts",
   "scripts": {
-    "dev": "vercel dev",
-    "build": "vercel build",
+    "dev": "ts-node api/server.ts",
     "start": "ts-node api/server.ts",
     "start:prod": "NODE_ENV=production ts-node api/server.ts",
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:stop": "pm2 stop dex-api",
     "pm2:restart": "pm2 restart dex-api",
     "pm2:logs": "pm2 logs dex-api",
+    "pm2:status": "pm2 status dex-api",
+    "validate": "./VALIDATE_ENV.sh",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
@@ -20,7 +21,7 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint api/**/*.ts tests/**/*.ts"
   },
-  "keywords": ["ifood", "api", "typescript", "vercel"],
+  "keywords": ["ifood", "api", "typescript", "contabo", "express"],
   "author": "Dex Team",
   "license": "ISC",
   "dependencies": {
