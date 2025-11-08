@@ -26,43 +26,28 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
+          username: dex
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: 22
           script: |
             set -e
-            APP_DIR=/home/dex/dex-app
+            cd /home/dex/dex-app
             
-            # 1. Limpar node_modules com sudo (resolve permissões)
-            if [ -d "$APP_DIR/node_modules" ]; then
-              echo "🧹 Limpando node_modules antigo..."
-              sudo rm -rf "$APP_DIR/node_modules" "$APP_DIR/package-lock.json"
-            fi
-            
-            # 2. Deploy como usuário dex
-            sudo -u dex bash << 'EOF'
-            set -e
-            APP_DIR=/home/dex/dex-app
-            
-            # Atualizar código
-            if [ ! -d "$APP_DIR/.git" ]; then
-              git clone --branch main git@github.com:drower22/dex-contabo.git "$APP_DIR"
-            fi
-            cd "$APP_DIR"
+            echo "📥 Atualizando código..."
             git fetch --all
             git reset --hard origin/main
             
-            # Instalar dependências
+            echo "📦 Instalando dependências..."
             npm install
             
-            # 3. Reiniciar PM2 (sem ecosystem.config.js)
+            echo "🔄 Reiniciando PM2..."
             pm2 delete dex-api 2>/dev/null || true
-            pm2 start api/server.ts --name dex-api --interpreter ts-node --node-args="--max-old-space-size=2048" --env production
+            pm2 start api/server.ts \
+              --name dex-api \
+              --interpreter tsx \
+              --instances 1 \
+              --env production
             pm2 save
             
             echo "✅ Deploy concluído!"
             pm2 status
-            EOF
-            
-            # Recarregar Nginx (como root)
-            sudo systemctl reload nginx 2>/dev/null || true
