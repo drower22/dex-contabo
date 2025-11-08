@@ -49,11 +49,7 @@ jobs:
             
             # 3. Reiniciar PM2 (sem ecosystem.config.js)
             pm2 delete dex-api 2>/dev/null || true
-            pm2 start api/server.ts \
-              --name dex-api \
-              --interpreter ts-node \
-              --node-args="--max-old-space-size=2048" \
-              --env production
+            pm2 start api/server.ts --name dex-api --interpreter ts-node --node-args="--max-old-space-size=2048" --env production
             pm2 save
             
             echo "✅ Deploy concluído!"
