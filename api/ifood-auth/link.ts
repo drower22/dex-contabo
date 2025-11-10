@@ -68,14 +68,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const requestBody = new URLSearchParams({
-      client_id: clientId,
+      clientId: clientId,  // ✅ CORRIGIDO: camelCase
     });
 
     console.log('[LINK] 📤 Sending request to iFood API:', {
       url: `${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`,
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      bodyParams: { client_id: `${clientId.substring(0, 8)}...` }
+      bodyParams: { clientId: `${clientId.substring(0, 8)}...` }
     });
 
     const response = await fetch(`${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`, {

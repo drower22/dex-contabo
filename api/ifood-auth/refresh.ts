@@ -140,10 +140,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: clientId!,
-        client_secret: clientSecret!,
-        refresh_token: refreshToken,
+        grantType: 'refresh_token',
+        clientId: clientId!,
+        clientSecret: clientSecret!,
+        refreshToken: refreshToken,
       }),
     });
 
