@@ -14,6 +14,11 @@
  * - ENCRYPTION_KEY em base64 (32 bytes)
  */
 
+import { webcrypto } from 'node:crypto';
+
+// Use Node.js Web Crypto API
+const crypto = webcrypto;
+
 /**
  * Obtém chave de criptografia do ambiente.
  * @returns Chave como Uint8Array
