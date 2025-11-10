@@ -7,13 +7,12 @@
  *
  * Contexto de credenciais (dois apps):
  * - Ambiente possui dois clientes distintos no iFood: (1) merchant+reviews e (2) merchant+financial.
- * - ESTA rota é neutra quanto ao escopo funcional; ela usa `process.env.IFOOD_CLIENT_ID` para requisitar o userCode.
- * - Em projetos que mantêm dois apps, recomenda-se ter variáveis separadas por escopo (ex.: IFOOD_CLIENT_ID_REVIEWS, IFOOD_CLIENT_ID_FINANCIAL)
- *   e apontar esta função para a credencial correta conforme o ambiente/deploy (ou duplicar a rota por escopo).
+ * - Cada scope requer suas próprias credenciais específicas.
  *
  * Variáveis de ambiente utilizadas:
  * - IFOOD_BASE_URL (opcional) | IFOOD_API_URL (opcional) | default: https://merchant-api.ifood.com.br
- * - IFOOD_CLIENT_ID (obrigatória)
+ * - IFOOD_CLIENT_ID_REVIEWS (obrigatória para scope=reviews)
+ * - IFOOD_CLIENT_ID_FINANCIAL (obrigatória para scope=financial)
  * - CORS_ORIGIN (opcional)
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -46,11 +45,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { storeId: bodyStoreId, merchantId } = req.body || {};
 
   try {
+    // Usar apenas variáveis específicas por scope (sem fallback genérico)
     const clientId = scope === 'financial'
-      ? (process.env.IFOOD_CLIENT_ID_FINANCIAL || process.env.IFOOD_CLIENT_ID)
-      : (scope === 'reviews'
-          ? (process.env.IFOOD_CLIENT_ID_REVIEWS || process.env.IFOOD_CLIENT_ID)
-          : process.env.IFOOD_CLIENT_ID);
+      ? process.env.IFOOD_CLIENT_ID_FINANCIAL
+      : scope === 'reviews'
+        ? process.env.IFOOD_CLIENT_ID_REVIEWS
+        : undefined;
+
+    if (!clientId) {
+      return res.status(400).json({ 
+        error: 'Missing client credentials',
+        message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} not configured`
+      });
+    }
 
     const response = await fetch(`${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`, {
       method: 'POST',
@@ -58,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({
-        client_id: clientId!,
+        client_id: clientId,
       }),
     });
 

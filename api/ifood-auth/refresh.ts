@@ -116,16 +116,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const refreshToken = await decryptFromB64(authData.refresh_token);
 
+    // Usar apenas variáveis específicas por scope (sem fallback genérico)
     const clientId = scope === 'financial'
-      ? (process.env.IFOOD_CLIENT_ID_FINANCIAL || process.env.IFOOD_CLIENT_ID)
-      : (scope === 'reviews'
-          ? (process.env.IFOOD_CLIENT_ID_REVIEWS || process.env.IFOOD_CLIENT_ID)
-          : process.env.IFOOD_CLIENT_ID);
+      ? process.env.IFOOD_CLIENT_ID_FINANCIAL
+      : scope === 'reviews'
+        ? process.env.IFOOD_CLIENT_ID_REVIEWS
+        : undefined;
+
     const clientSecret = scope === 'financial'
-      ? (process.env.IFOOD_CLIENT_SECRET_FINANCIAL || process.env.IFOOD_CLIENT_SECRET)
-      : (scope === 'reviews'
-          ? (process.env.IFOOD_CLIENT_SECRET_REVIEWS || process.env.IFOOD_CLIENT_SECRET)
-          : process.env.IFOOD_CLIENT_SECRET);
+      ? process.env.IFOOD_CLIENT_SECRET_FINANCIAL
+      : scope === 'reviews'
+        ? process.env.IFOOD_CLIENT_SECRET_REVIEWS
+        : undefined;
+
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({ 
+        error: 'Missing client credentials',
+        message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} or SECRET not configured`
+      });
+    }
 
     const response = await fetch(`${IFOOD_BASE_URL}/authentication/v1.0/oauth/token`, {
       method: 'POST',
