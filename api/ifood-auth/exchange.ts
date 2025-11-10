@@ -44,6 +44,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const scopeParam = (req.query.scope as string) || req.body?.scope;
   const scope = scopeParam === 'financial' ? 'financial' : (scopeParam === 'reviews' ? 'reviews' : undefined);
   const { storeId: bodyStoreId, merchantId: bodyMerchantId, authorizationCode, authorizationCodeVerifier } = req.body;
+  
+  console.log('[ifood-auth/exchange] 🚀 Starting exchange...', {
+    scope,
+    bodyStoreId,
+    bodyMerchantId,
+    hasAuthCode: !!authorizationCode,
+    hasVerifier: !!authorizationCodeVerifier
+  });
+
   if ((!bodyStoreId && !bodyMerchantId) || !authorizationCode || !authorizationCodeVerifier) {
     return res.status(400).json({ error: 'Informe storeId (UUID interno) ou merchantId, além de authorizationCode e authorizationCodeVerifier.' });
   }
@@ -78,8 +87,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!resolvedAccountId) {
+      console.error('[ifood-auth/exchange] ❌ Account not found');
       return res.status(404).json({ error: 'Conta não encontrada para o storeId/merchantId informado.' });
     }
+
+    console.log('[ifood-auth/exchange] ✅ Account resolved:', { resolvedAccountId, existingMerchantId });
 
     const clientId = scope === 'financial'
       ? (process.env.IFOOD_CLIENT_ID_FINANCIAL || process.env.IFOOD_CLIENT_ID)
@@ -91,6 +103,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : (scope === 'reviews'
           ? (process.env.IFOOD_CLIENT_SECRET_REVIEWS || process.env.IFOOD_CLIENT_SECRET)
           : process.env.IFOOD_CLIENT_SECRET);
+
+    console.log('[ifood-auth/exchange] 🔑 Using credentials:', {
+      hasClientId: !!clientId,
+      hasClientSecret: !!clientSecret,
+      scope
+    });
 
     const response = await fetch(`${IFOOD_BASE_URL}/authentication/v1.0/oauth/token`, {
       method: 'POST',
@@ -106,7 +124,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const tokenData = await response.json();
 
+    console.log('[ifood-auth/exchange] 📥 iFood response:', {
+      status: response.status,
+      ok: response.ok,
+      hasAccessToken: !!tokenData.accessToken,
+      hasRefreshToken: !!tokenData.refreshToken,
+      hasExpiresIn: !!tokenData.expiresIn,
+      merchantIdFromResponse: tokenData.merchantId || tokenData.merchantID || tokenData.merchant_id || null
+    });
+
     if (!response.ok) {
+      console.error('[ifood-auth/exchange] ❌ iFood exchange failed:', tokenData);
       return res.status(response.status).json({ error: 'Falha ao trocar código por token', details: tokenData });
     }
 
@@ -117,6 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       || tokenData?.merchant?.id;
 
     if (!merchantId) {
+      console.log('[ifood-auth/exchange] 🔍 Fetching merchantId from /merchants/me...');
       try {
         const meResp = await fetch(`${IFOOD_BASE_URL}/merchant/v1.0/merchants/me`, {
           headers: { Authorization: `Bearer ${tokenData.accessToken}` },
@@ -124,11 +153,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (meResp.ok) {
           const me = await meResp.json();
           merchantId = me?.id || me?.merchantId || me?.merchantID;
+          console.log('[ifood-auth/exchange] ✅ MerchantId from /me:', merchantId);
         }
-      } catch {}
+      } catch (e: any) {
+        console.error('[ifood-auth/exchange] ⚠️ Failed to fetch /merchants/me:', e.message);
+      }
     }
+    
     // Fallback adicional: extrair do JWT (claim merchant_scope)
     if (!merchantId && tokenData?.accessToken) {
+      console.log('[ifood-auth/exchange] 🔍 Extracting merchantId from JWT...');
       try {
         const [, payloadB64] = String(tokenData.accessToken).split('.');
         const json = JSON.parse(Buffer.from(payloadB64.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8'));
@@ -136,33 +170,84 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (Array.isArray(scopeArr) && scopeArr.length) {
           const first = scopeArr[0];
           const candidate = String(first).split(':')[0];
-          if (candidate && candidate.length > 0) merchantId = candidate;
+          if (candidate && candidate.length > 0) {
+            merchantId = candidate;
+            console.log('[ifood-auth/exchange] ✅ MerchantId from JWT:', merchantId);
+          }
         }
-      } catch {}
+      } catch (e: any) {
+        console.error('[ifood-auth/exchange] ⚠️ Failed to extract from JWT:', e.message);
+      }
     }
 
-    await supabase
+    console.log('[ifood-auth/exchange] 🏪 Final merchantId:', merchantId);
+
+    // Encrypt tokens
+    console.log('[ifood-auth/exchange] 🔐 Encrypting tokens...');
+    const encryptedAccessToken = await encryptToB64(tokenData.accessToken);
+    const encryptedRefreshToken = await encryptToB64(tokenData.refreshToken);
+    console.log('[ifood-auth/exchange] ✅ Tokens encrypted:', {
+      accessTokenLength: encryptedAccessToken.length,
+      refreshTokenLength: encryptedRefreshToken.length
+    });
+
+    // Prepare upsert data
+    const upsertData = {
+      account_id: resolvedAccountId,
+      scope: scope || 'reviews',
+      ifood_merchant_id: merchantId || null,
+      access_token: encryptedAccessToken,
+      refresh_token: encryptedRefreshToken,
+      expires_at: new Date(Date.now() + tokenData.expiresIn * 1000).toISOString(),
+      status: 'connected',
+    };
+
+    console.log('[ifood-auth/exchange] 💾 Upserting to Supabase...', {
+      account_id: upsertData.account_id,
+      scope: upsertData.scope,
+      ifood_merchant_id: upsertData.ifood_merchant_id,
+      status: upsertData.status,
+      expires_at: upsertData.expires_at,
+      hasAccessToken: !!upsertData.access_token,
+      hasRefreshToken: !!upsertData.refresh_token
+    });
+
+    const { data: savedData, error: upsertError } = await supabase
       .from('ifood_store_auth')
-      .upsert({
-        account_id: resolvedAccountId,
-        scope: scope || 'reviews',
-        ifood_merchant_id: merchantId || null,
-        access_token: await encryptToB64(tokenData.accessToken),
-        refresh_token: await encryptToB64(tokenData.refreshToken),
-        expires_at: new Date(Date.now() + tokenData.expiresIn * 1000).toISOString(),
-        status: 'connected',
-      }, { onConflict: 'account_id,scope' });
+      .upsert(upsertData, { onConflict: 'account_id,scope' })
+      .select();
+
+    if (upsertError) {
+      console.error('[ifood-auth/exchange] ❌ Supabase upsert error:', {
+        message: upsertError.message,
+        details: upsertError.details,
+        hint: upsertError.hint,
+        code: upsertError.code
+      });
+      throw new Error(`Failed to save tokens: ${upsertError.message}`);
+    }
+
+    console.log('[ifood-auth/exchange] ✅ Upsert successful:', savedData);
 
     // Após salvar os tokens, atualiza a tabela 'accounts' com o merchantId correto
     const finalMerchantId = merchantId || existingMerchantId;
     if (finalMerchantId) {
-      await supabase
+      console.log('[ifood-auth/exchange] 📝 Updating accounts table with merchantId:', finalMerchantId);
+      const { error: updateError } = await supabase
         .from('accounts')
         .update({
           ifood_merchant_id: merchantId,
         })
         .eq('id', resolvedAccountId);
+
+      if (updateError) {
+        console.error('[ifood-auth/exchange] ⚠️ Failed to update accounts:', updateError);
+      } else {
+        console.log('[ifood-auth/exchange] ✅ Accounts table updated');
+      }
     }
+
+    console.log('[ifood-auth/exchange] 🎉 Exchange completed successfully');
 
     res.status(200).json({
       access_token: tokenData.accessToken,
@@ -171,6 +256,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
   } catch (e: any) {
+    console.error('[ifood-auth/exchange] 💥 Fatal error:', {
+      message: e.message,
+      stack: e.stack
+    });
     res.status(500).json({ error: 'Erro interno no servidor', message: e.message });
   }
 }
