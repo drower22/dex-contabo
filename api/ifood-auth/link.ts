@@ -1,24 +1,9 @@
 /**
  * @file dex-contabo/api/ifood-auth/link.ts
- * @description Gera userCode para vínculo OAuth (Contabo deployment)
- * 
- * Versão do link.ts para deployment no Contabo.
- * Rota serverless responsável por SOLICITAR o `userCode` (código de vínculo) do fluxo de autenticação distribuída.
- *
- * Contexto de credenciais (dois apps):
- * - Ambiente possui dois clientes distintos no iFood: (1) merchant+reviews e (2) merchant+financial.
- * - Cada scope requer suas próprias credenciais específicas.
- *
- * Variáveis de ambiente utilizadas:
- * - IFOOD_BASE_URL (opcional) | IFOOD_API_URL (opcional) | default: https://merchant-api.ifood.com.br
- * - IFOOD_CLIENT_ID_REVIEWS (obrigatória para scope=reviews)
- * - IFOOD_CLIENT_ID_FINANCIAL (obrigatória para scope=financial)
- * - CORS_ORIGIN (opcional)
+ * @description Gera userCode para vínculo OAuth (Contabo deployment) - COM LOGS DE DEBUG
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-
-// Rota dedicada para solicitar o código de autorização (userCode).
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
 
@@ -28,21 +13,36 @@ const supabase = createClient(
 );
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  console.log('\n========== [LINK] INÍCIO DA REQUISIÇÃO ==========');
+  console.log('[LINK] 📥 Method:', req.method);
+  console.log('[LINK] 📥 URL:', req.url);
+  console.log('[LINK] 📥 Query:', JSON.stringify(req.query, null, 2));
+  console.log('[LINK] 📥 Body:', JSON.stringify(req.body, null, 2));
+  
   res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
+    console.log('[LINK] ✅ OPTIONS request - returning 200');
     return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
+    console.log('[LINK] ❌ Method not allowed:', req.method);
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   const scopeParam = (req.query.scope as string) || req.body?.scope;
   const scope = scopeParam === 'financial' ? 'financial' : (scopeParam === 'reviews' ? 'reviews' : undefined);
   const { storeId: bodyStoreId, merchantId } = req.body || {};
+
+  console.log('[LINK] 🔍 Parsed params:', {
+    scopeParam,
+    scope,
+    bodyStoreId,
+    merchantId
+  });
 
   try {
     // Usar apenas variáveis específicas por scope (sem fallback genérico)
@@ -52,42 +52,89 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? process.env.IFOOD_CLIENT_ID_REVIEWS
         : undefined;
 
+    console.log('[LINK] 🔑 Credentials check:', {
+      scope,
+      hasClientIdFinancial: !!process.env.IFOOD_CLIENT_ID_FINANCIAL,
+      hasClientIdReviews: !!process.env.IFOOD_CLIENT_ID_REVIEWS,
+      selectedClientId: clientId ? `${clientId.substring(0, 8)}...` : 'undefined'
+    });
+
     if (!clientId) {
+      console.log('[LINK] ❌ Missing client credentials for scope:', scope);
       return res.status(400).json({ 
         error: 'Missing client credentials',
         message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} not configured`
       });
     }
 
+    const requestBody = new URLSearchParams({
+      client_id: clientId,
+    });
+
+    console.log('[LINK] 📤 Sending request to iFood API:', {
+      url: `${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      bodyParams: { client_id: `${clientId.substring(0, 8)}...` }
+    });
+
     const response = await fetch(`${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({
-        client_id: clientId,
-      }),
+      body: requestBody,
+    });
+
+    console.log('[LINK] 📥 iFood API response:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      headers: Object.fromEntries(response.headers.entries())
     });
 
     const data = await response.json();
+    console.log('[LINK] 📥 iFood API response body:', JSON.stringify(data, null, 2));
 
     if (!response.ok) {
-      return res.status(response.status).json({ error: 'Falha ao solicitar código de autorização', details: data });
+      console.log('[LINK] ❌ iFood API returned error');
+      return res.status(response.status).json({ 
+        error: 'Falha ao solicitar código de autorização', 
+        details: data,
+        debug: {
+          scope,
+          clientIdUsed: `${clientId.substring(0, 8)}...`,
+          ifoodStatus: response.status
+        }
+      });
     }
 
-    // Persistência opcional: se tivermos storeId (interno) diretamente ou via merchantId, salvar link_code/verifier por escopo
+    // Persistência opcional
     try {
       let storeId = bodyStoreId;
       if (!storeId && merchantId) {
+        console.log('[LINK] 🔍 Resolving storeId from merchantId:', merchantId);
         const { data: acc, error } = await supabase
           .from('accounts')
           .select('id')
           .eq('ifood_merchant_id', merchantId)
           .single();
-        if (!error && acc?.id) storeId = acc.id as string;
+        if (!error && acc?.id) {
+          storeId = acc.id as string;
+          console.log('[LINK] ✅ StoreId resolved:', storeId);
+        } else {
+          console.log('[LINK] ⚠️ Could not resolve storeId:', error?.message);
+        }
       }
 
       if (storeId) {
+        console.log('[LINK] 💾 Persisting to Supabase:', {
+          account_id: storeId,
+          scope,
+          hasUserCode: !!data.userCode,
+          hasVerifier: !!data.authorizationCodeVerifier
+        });
+        
         await supabase
           .from('ifood_store_auth')
           .upsert({
@@ -97,16 +144,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             verifier: data.authorizationCodeVerifier,
             status: 'pending',
           }, { onConflict: 'account_id,scope' });
+        
+        console.log('[LINK] ✅ Persisted to Supabase');
+      } else {
+        console.log('[LINK] ⚠️ No storeId available for persistence');
       }
     } catch (persistErr) {
-      // Não bloquear a resposta ao cliente caso a persistência falhe
-      console.warn('[ifood-auth/link] persist warning:', (persistErr as any)?.message || persistErr);
+      console.error('[LINK] ⚠️ Persistence error:', (persistErr as any)?.message || persistErr);
     }
 
-    // O corpo da resposta do iFood já contém `userCode`, `authorizationCodeVerifier`, etc.
+    console.log('[LINK] ✅ SUCCESS - Returning userCode to client');
+    console.log('========== [LINK] FIM DA REQUISIÇÃO ==========\n');
     res.status(200).json(data);
 
   } catch (e: any) {
-    res.status(500).json({ error: 'Erro interno no servidor', message: e.message });
+    console.error('[LINK] ❌ EXCEPTION:', {
+      message: e.message,
+      stack: e.stack,
+      name: e.name
+    });
+    console.log('========== [LINK] FIM DA REQUISIÇÃO (ERROR) ==========\n');
+    res.status(500).json({ 
+      error: 'Erro interno no servidor', 
+      message: e.message,
+      stack: process.env.NODE_ENV === 'development' ? e.stack : undefined
+    });
   }
 }
