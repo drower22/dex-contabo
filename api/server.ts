@@ -100,12 +100,16 @@ function loadHandler(modulePath: string) {
   }
 }
 
-// Carregar handlers
+// Carregar handlers de autenticação
 const healthHandler = loadHandler('./ifood-auth/health');
 const linkHandler = loadHandler('./ifood-auth/link');
 const exchangeHandler = loadHandler('./ifood-auth/exchange');
 const refreshHandler = loadHandler('./ifood-auth/refresh');
 const statusHandler = loadHandler('./ifood-auth/status');
+const debugEnvHandler = loadHandler('./ifood-auth/debug-env');
+
+// Carregar handlers financeiros
+const payoutsUnifiedHandler = loadHandler('./ifood-financial/payouts-unified');
 
 // Montar rotas
 if (healthHandler) {
@@ -150,6 +154,21 @@ if (statusHandler) {
 } else {
   app.get('/api/ifood-auth/status', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Status handler not loaded' });
+  });
+}
+
+if (debugEnvHandler) {
+  app.get('/api/ifood-auth/debug-env', adaptVercelHandler(debugEnvHandler));
+  console.log('✅ Debug env handler loaded');
+}
+
+// Rotas financeiras
+if (payoutsUnifiedHandler) {
+  app.get('/api/ifood/financial/payouts-unified', adaptVercelHandler(payoutsUnifiedHandler));
+  console.log('✅ Payouts unified handler loaded');
+} else {
+  app.get('/api/ifood/financial/payouts-unified', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Payouts unified handler not loaded' });
   });
 }
 
