@@ -58,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({
-        clientId: clientId!,
+        client_id: clientId!,
       }),
     });
 

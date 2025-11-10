@@ -64,12 +64,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (error) {
       console.error('[ifood-auth/status] Supabase error:', error);
-      // Persistir erro genérico
-      try {
-        await supabase
-          .from('ifood_store_auth')
-          .upsert({ account_id: String(accountId), scope: String(scope), status: 'error' }, { onConflict: 'account_id,scope' });
-      } catch {}
       return res.status(500).json({ 
         status: 'error', 
         message: 'Database query failed',
@@ -77,14 +71,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Se não há registro, status é 'pending'
+    // Se não há registro, status é 'pending' (apenas resposta; não persiste)
     if (!data || !data.access_token) {
-      // Persistir pendente
-      try {
-        await supabase
-          .from('ifood_store_auth')
-          .upsert({ account_id: String(accountId), scope: String(scope), status: 'pending' }, { onConflict: 'account_id,scope' });
-      } catch {}
       return res.status(200).json({ 
         status: 'pending',
         message: 'No authentication record found for this account and scope'
@@ -97,14 +85,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       accessToken = await decryptFromB64(data.access_token);
     } catch (decryptError) {
       console.error('[ifood-auth/status] Failed to decrypt token:', decryptError);
-      // Persistir como pending para não violar constraints e sinalizar re-vínculo/refresh
-      try {
-        await supabase
-          .from('ifood_store_auth')
-          .update({ status: 'pending' })
-          .eq('account_id', String(accountId))
-          .eq('scope', String(scope));
-      } catch {}
       return res.status(200).json({ 
         status: 'pending',
         message: 'Token encrypted with legacy scheme or invalid. Please re-link.'
@@ -141,16 +121,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      // Token inválido ou expirado
+      // Token inválido ou expirado: apenas responde, não altera o status salvo
       if (ifoodResponse.status === 401 || ifoodResponse.status === 403) {
-        // Persistir pending (expirado/revogado)
-        try {
-          await supabase
-            .from('ifood_store_auth')
-            .update({ status: 'pending' })
-            .eq('account_id', String(accountId))
-            .eq('scope', String(scope));
-        } catch {}
         return res.status(200).json({ 
           status: 'pending',
           message: 'Token expired or revoked. Please reconnect.',
@@ -158,16 +130,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      // Outros erros da API iFood
+      // Outros erros da API iFood: apenas responde, não altera o status salvo
       console.error('[ifood-auth/status] iFood API error:', ifoodResponse.status);
-      // Persistir erro genérico
-      try {
-        await supabase
-          .from('ifood_store_auth')
-          .update({ status: 'error' })
-          .eq('account_id', String(accountId))
-          .eq('scope', String(scope));
-      } catch {}
       return res.status(200).json({ 
         status: 'error',
         message: `iFood API returned ${ifoodResponse.status}`,
@@ -177,14 +141,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (ifoodError: any) {
       // Erro de rede ou timeout ao chamar API iFood
       console.error('[ifood-auth/status] Failed to call iFood API:', ifoodError);
-      // Persistir erro de rede
-      try {
-        await supabase
-          .from('ifood_store_auth')
-          .update({ status: 'error' })
-          .eq('account_id', String(accountId))
-          .eq('scope', String(scope));
-      } catch {}
       return res.status(200).json({ 
         status: 'error',
         message: 'Failed to validate token with iFood API',
@@ -194,12 +150,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (e: any) {
     console.error('[ifood-auth/status] Exception:', e);
-    // Persistir erro inesperado
-    try {
-      await supabase
-        .from('ifood_store_auth')
-        .upsert({ account_id: String(accountId), scope: String(scope), status: 'error' }, { onConflict: 'account_id,scope' });
-    } catch {}
     return res.status(500).json({ 
       status: 'error',
       message: 'Internal server error',

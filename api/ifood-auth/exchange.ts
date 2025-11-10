@@ -114,11 +114,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        grantType: 'authorization_code',
-        clientId: clientId!,
-        clientSecret: clientSecret!,
-        authorizationCode,
-        authorizationCodeVerifier,
+        grant_type: 'authorization_code',
+        client_id: clientId!,
+        client_secret: clientSecret!,
+        authorization_code: authorizationCode,
+        authorization_code_verifier: authorizationCodeVerifier,
       }),
     });
 
