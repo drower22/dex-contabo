@@ -202,8 +202,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 3) Baixar .gz
     console.info('[ifood-reconciliation] download_start', { traceId, downloadUrl });
-    const downloadTarget = proxifyIFoodUrl(downloadUrl);
-    const fileResp = await fetch(downloadTarget, withIFoodProxy({ headers: baseHeaders }));
+    // URLs do S3 já vêm pré-assinadas, não precisam de proxy nem headers adicionais
+    const fileResp = await fetch(downloadUrl);
     if (!fileResp.ok) {
       const body = await fileResp.text().catch(() => '');
       console.error('[ifood-reconciliation] download_fetch_failed', { traceId, status: fileResp.status, downloadUrl, snippet: body.slice(0, 300) });
