@@ -182,7 +182,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(502).json({ error: 'Resposta inválida ao consultar conciliação', details: lastBodySnippet, traceId });
         }
 
-        downloadUrl = pollPayload?.downloadPath ?? pollPayload?.downloadUrl ?? pollPayload?.url ?? null;
+        downloadUrl = pollPayload?.filePath ?? pollPayload?.downloadPath ?? pollPayload?.downloadUrl ?? pollPayload?.url ?? null;
         if (downloadUrl) {
           console.info('[ifood-reconciliation] download_ready', { traceId, attempt, fetchUrl, requestId });
           break;
