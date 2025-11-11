@@ -4,16 +4,17 @@
  * 
  * Versão do reconciliation.ts para deployment no Contabo.
  * Implementa o fluxo completo de obtenção de relatórios de conciliação:
- * 1. Solicita geração on-demand do relatório (POST)
+ * 1. Solicita geração on-demand do relatório (POST) - OPCIONAL se reportId fornecido
  * 2. Faz polling até arquivo estar pronto (GET com retry)
  * 3. Baixa o arquivo .gz
  * 4. Descompacta e retorna o CSV
  * 
  * QUERY PARAMETERS:
  * - merchantId (obrigatório): ID do merchant no iFood
- * - competence (obrigatório): Competência YYYY-MM (ex: 2024-03)
+ * - competence (obrigatório se não tiver reportId): Competência YYYY-MM (ex: 2024-03)
  *   OU
  * - year + month: Ano e mês separados
+ * - reportId (opcional): Se fornecido, pula a etapa de solicitação e vai direto para polling
  * 
  * HEADERS:
  * - x-ifood-token ou authorization: Token OAuth2 do iFood
@@ -25,6 +26,7 @@
  * 
  * @example
  * GET /api/ifood/reconciliation?merchantId=abc123&competence=2024-03
+ * GET /api/ifood/reconciliation?merchantId=abc123&reportId=xyz789
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -42,7 +44,7 @@ const IFOOD_FINANCIAL_V3 = `${IFOOD_BASE_URL}/financial/v3.0`;
 
 /**
  * Handler principal para conciliação financeira.
- * @param req - Request com merchantId e competence
+ * @param req - Request com merchantId e competence ou reportId
  * @param res - Response com CSV em texto plano
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -70,6 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const url = new URL(req.url || '/', 'https://local');
     const merchantId = (url.searchParams.get('merchantId') || '').trim();
     const competence = (url.searchParams.get('competence') || '').trim();
+    const reportIdParam = (url.searchParams.get('reportId') || '').trim();
     const year = url.searchParams.get('year');
     const month = url.searchParams.get('month');
 
@@ -79,11 +82,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       finalCompetence = `${year}-${mm}`;
     }
 
-    if (!merchantId || !finalCompetence) {
-      return res.status(400).json({ error: 'Parâmetros obrigatórios: merchantId e competence (ou year + month).', traceId });
+    if (!merchantId) {
+      return res.status(400).json({ error: 'Parâmetro obrigatório: merchantId', traceId });
     }
 
-    // 1) Solicitar conciliação on-demand (POST) e obter requestId
+    // Se não tiver reportId, precisa de competence para criar nova solicitação
+    if (!reportIdParam && !finalCompetence) {
+      return res.status(400).json({ error: 'Parâmetros obrigatórios: competence (ou year + month) ou reportId', traceId });
+    }
+
     const baseHeaders: Record<string, string> = {
       Accept: 'application/json',
       Authorization: `Bearer ${token}`,
@@ -93,48 +100,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const homo = (req.headers['x-request-homologation'] || '').toString().trim().toLowerCase();
     if (homo === 'true' || homo === '1') baseHeaders['x-request-homologation'] = 'true';
 
-    const generateUrl = `${IFOOD_FINANCIAL_V3}/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand`;
-    const generateResp = await fetch(generateUrl, {
-      method: 'POST',
-      headers: {
-        ...baseHeaders,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ competence: finalCompetence }),
-    });
-    console.info('[ifood-reconciliation] POST generate', { traceId, generateUrl, merchantId, competence: finalCompetence });
+    let requestId: string | null = reportIdParam || null;
 
-    const generateText = await generateResp.text().catch(() => '');
-    
-    // Parse da resposta (funciona para 202 e 409)
-    let generatePayload: any = {};
-    try {
-      generatePayload = generateText ? JSON.parse(generateText) : {};
-    } catch (err) {
-      console.warn('[ifood-reconciliation] generate_invalid_json', { traceId, snippet: generateText.slice(0, 500), err: (err as Error)?.message });
-    }
-
-    // Tratar caso 409: já existe solicitação recente - reusar o requestId
-    if (generateResp.status === 409) {
-      const existingRequestId = generatePayload?.requestId || generatePayload?.id;
-      if (!existingRequestId) {
-        console.error('[ifood-reconciliation] conflict_no_request_id', { traceId, status: 409, body: generateText });
-        return res.status(409).json({ error: 'Já existe uma solicitação recente, mas não foi possível obter o requestId', details: generateText, traceId });
-      }
-      console.info('[ifood-reconciliation] reusing_existing_request', { traceId, requestId: existingRequestId, merchantId, competence: finalCompetence });
-    } else if (!generateResp.ok) {
-      console.error('[ifood-reconciliation] generate_failed', { traceId, status: generateResp.status, body: generateText, generateUrl, merchantId, competence: finalCompetence, tokenPreview });
-      return res.status(generateResp.status).json({ error: 'Erro ao solicitar conciliação on-demand', details: generateText, traceId });
-    }
-
-    // Extrair requestId da resposta (202 ou 409)
-    const requestId = generatePayload?.requestId || generatePayload?.requestID || generatePayload?.id;
+    // 1) Solicitar conciliação on-demand (POST) e obter requestId - APENAS se não tiver reportId
     if (!requestId) {
-      console.error('[ifood-reconciliation] request_id_missing', { traceId, status: generateResp.status, payload: generatePayload, merchantId, competence: finalCompetence });
-      return res.status(502).json({ error: 'request_id_missing', details: generatePayload, traceId });
+      const generateUrl = `${IFOOD_FINANCIAL_V3}/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand`;
+      const generateResp = await fetch(generateUrl, {
+        method: 'POST',
+        headers: {
+          ...baseHeaders,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ competence: finalCompetence }),
+      });
+      console.info('[ifood-reconciliation] POST generate', { traceId, generateUrl, merchantId, competence: finalCompetence });
+
+      const generateText = await generateResp.text().catch(() => '');
+      
+      // Parse da resposta (funciona para 202 e 409)
+      let generatePayload: any = {};
+      try {
+        generatePayload = generateText ? JSON.parse(generateText) : {};
+      } catch (err) {
+        console.warn('[ifood-reconciliation] generate_invalid_json', { traceId, snippet: generateText.slice(0, 500), err: (err as Error)?.message });
+      }
+
+      // Tratar caso 409: já existe solicitação recente - reusar o requestId
+      if (generateResp.status === 409) {
+        const existingRequestId = generatePayload?.requestId || generatePayload?.id;
+        if (!existingRequestId) {
+          console.error('[ifood-reconciliation] conflict_no_request_id', { traceId, status: 409, body: generateText });
+          return res.status(409).json({ error: 'Já existe uma solicitação recente, mas não foi possível obter o requestId', details: generateText, traceId });
+        }
+        requestId = existingRequestId;
+        console.info('[ifood-reconciliation] reusing_existing_request', { traceId, requestId, merchantId, competence: finalCompetence });
+      } else if (!generateResp.ok) {
+        console.error('[ifood-reconciliation] generate_failed', { traceId, status: generateResp.status, body: generateText, generateUrl, merchantId, competence: finalCompetence, tokenPreview });
+        return res.status(generateResp.status).json({ error: 'Erro ao solicitar conciliação on-demand', details: generateText, traceId });
+      } else {
+        // Extrair requestId da resposta 202
+        requestId = generatePayload?.requestId || generatePayload?.requestID || generatePayload?.id;
+        if (!requestId) {
+          console.error('[ifood-reconciliation] request_id_missing', { traceId, status: generateResp.status, payload: generatePayload, merchantId, competence: finalCompetence });
+          return res.status(502).json({ error: 'request_id_missing', details: generatePayload, traceId });
+        }
+        console.info('[ifood-reconciliation] request_id_obtained', { traceId, requestId, status: generateResp.status, merchantId, competence: finalCompetence });
+      }
+    } else {
+      console.info('[ifood-reconciliation] using_provided_report_id', { traceId, requestId, merchantId });
     }
-    
-    console.info('[ifood-reconciliation] request_id_obtained', { traceId, requestId, status: generateResp.status, merchantId, competence: finalCompetence });
 
     // 2) Poll do request até obter download
     const fetchUrl = `${IFOOD_FINANCIAL_V3}/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand/${encodeURIComponent(requestId)}`;
@@ -202,7 +216,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const gzBuffer = Buffer.from(await fileResp.arrayBuffer());
 
-    // 3) Gunzip e retornar CSV com encoding correto
+    // 4) Gunzip e retornar CSV com encoding correto
     zlib.gunzip(gzBuffer, (err, out) => {
       if (err) {
         console.error('[ifood-reconciliation] gunzip error', { traceId, err: err.message });
