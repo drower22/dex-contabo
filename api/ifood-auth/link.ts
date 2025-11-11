@@ -4,6 +4,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { buildIFoodUrl, withIFoodProxy } from '../_shared/proxy';
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
 
@@ -78,13 +79,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       bodyParams: { clientId: `${clientId.substring(0, 8)}...` }
     });
 
-    const response = await fetch(`${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`, {
+    const url = buildIFoodUrl('/authentication/v1.0/oauth/userCode');
+    const response = await fetch(url, withIFoodProxy({
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: requestBody,
-    });
+    }));
 
     console.log('[LINK] 📥 iFood API response:', {
       status: response.status,
@@ -93,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers: Object.fromEntries(response.headers.entries())
     });
 
-    const data = await response.json();
+    const data: any = await response.json();
     console.log('[LINK] 📥 iFood API response body:', JSON.stringify(data, null, 2));
 
     if (!response.ok) {

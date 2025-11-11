@@ -31,7 +31,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import zlib from 'zlib';
-import { withIFoodProxy } from '../_shared/proxy';
+import { buildIFoodUrl, proxifyIFoodUrl, withIFoodProxy } from '../_shared/proxy';
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*';
 const cors = {
@@ -105,7 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 1) Solicitar conciliação on-demand (POST) e obter requestId - APENAS se não tiver reportId
     if (!requestId) {
-      const generateUrl = `${IFOOD_FINANCIAL_V3}/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand`;
+      const generateUrl = buildIFoodUrl(`/financial/v3.0/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand`);
       const generateResp = await fetch(generateUrl, withIFoodProxy({
         method: 'POST',
         headers: {
@@ -152,7 +152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 2) Poll do request até obter download
-    const fetchUrl = `${IFOOD_FINANCIAL_V3}/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand/${encodeURIComponent(requestId)}`;
+    const fetchUrl = buildIFoodUrl(`/financial/v3.0/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand/${encodeURIComponent(requestId)}`);
     const maxAttempts = 10;
     const waitMs = 1500;
     let downloadUrl: string | null = null;
@@ -202,7 +202,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 3) Baixar .gz
     console.info('[ifood-reconciliation] download_start', { traceId, downloadUrl });
-    const fileResp = await fetch(downloadUrl, withIFoodProxy({ headers: baseHeaders }));
+    const downloadTarget = proxifyIFoodUrl(downloadUrl);
+    const fileResp = await fetch(downloadTarget, withIFoodProxy({ headers: baseHeaders }));
     if (!fileResp.ok) {
       const body = await fileResp.text().catch(() => '');
       console.error('[ifood-reconciliation] download_fetch_failed', { traceId, status: fileResp.status, downloadUrl, snippet: body.slice(0, 300) });

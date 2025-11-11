@@ -21,6 +21,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { decryptFromB64, encryptToB64 } from '../_shared/crypto';
+import { buildIFoodUrl, withIFoodProxy } from '../_shared/proxy';
 
 // Rota dedicada para refresh de token, garantindo que o método POST seja aceito.
 
@@ -136,7 +137,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const response = await fetch(`${IFOOD_BASE_URL}/authentication/v1.0/oauth/token`, {
+    const url = buildIFoodUrl('/authentication/v1.0/oauth/token');
+    const response = await fetch(url, withIFoodProxy({
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -145,9 +147,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         clientSecret: clientSecret!,
         refreshToken: refreshToken,
       }),
-    });
+    }));
 
-    const tokenData = await response.json();
+    const tokenData: any = await response.json();
 
     if (!response.ok) {
       return res.status(response.status).json({ error: 'Falha ao renovar token com iFood', details: tokenData });
