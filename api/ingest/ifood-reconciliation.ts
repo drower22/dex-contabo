@@ -146,7 +146,9 @@ async function handlePost(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const accessToken = tokenJson.access_token;
-    await logToDb('info', 'auth', 'Token obtido com sucesso');
+    const tokenPreview = `${accessToken.slice(0, 6)}...${accessToken.slice(-4)}`;
+    await logToDb('info', 'auth', 'Token obtido com sucesso', { tokenPreview });
+    console.info('[ifood-ingest] access_token_received', { traceId, tokenPreview });
 
     await persistRun({ status: 'running', started_at: new Date().toISOString() });
 

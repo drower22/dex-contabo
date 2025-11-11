@@ -60,6 +60,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Auth distribuída: exige token por loja
     const tokenHeader = (req.headers['x-ifood-token'] || req.headers['authorization'] || '') as string;
     const token = tokenHeader?.toLowerCase().startsWith('bearer ') ? tokenHeader.slice(7) : tokenHeader;
+    const tokenPreview = token ? `${token.slice(0, 6)}...${token.slice(-4)}` : null;
+    console.info('[ifood-reconciliation] token_received', { traceId, hasToken: Boolean(token), tokenPreview });
     if (!token) {
       console.error('[ifood-reconciliation] missing_token', { traceId, headers: req.headers });
       return res.status(401).json({ error: 'Token de autenticação não fornecido.', traceId });
@@ -119,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       console.info('[ifood-reconciliation] reusing_existing_request', { traceId, requestId: existingRequestId, merchantId, competence: finalCompetence });
     } else if (!generateResp.ok) {
-      console.error('[ifood-reconciliation] generate_failed', { traceId, status: generateResp.status, body: generateText, generateUrl, merchantId, competence: finalCompetence });
+      console.error('[ifood-reconciliation] generate_failed', { traceId, status: generateResp.status, body: generateText, generateUrl, merchantId, competence: finalCompetence, tokenPreview });
       return res.status(generateResp.status).json({ error: 'Erro ao solicitar conciliação on-demand', details: generateText, traceId });
     }
 
