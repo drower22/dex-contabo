@@ -44,9 +44,13 @@ export function withIFoodProxy(init?: RequestInit): RequestInit {
     headers.set('x-shared-key', key);
   }
 
-  headers.delete('host');
-  headers.delete('x-forwarded-for');
-  headers.delete('x-real-ip');
+  // Remover headers que causam erro no fetch do Node.js
+  const forbiddenHeaders = [
+    'host', 'x-forwarded-for', 'x-real-ip',
+    'connection', 'keep-alive', 'transfer-encoding',
+    'content-length', 'upgrade', 'expect'
+  ];
+  forbiddenHeaders.forEach(h => headers.delete(h));
 
   return {
     ...init,

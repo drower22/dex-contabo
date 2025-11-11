@@ -142,11 +142,16 @@ app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
 
     const headers = new Headers();
     headers.set('x-shared-key', sharedKey);
-    // Replicar cabeçalhos relevantes
+    // Replicar cabeçalhos relevantes (excluir headers que causam erro no fetch)
+    const forbiddenHeaders = [
+      'host', 'x-forwarded-for', 'x-real-ip', 
+      'connection', 'keep-alive', 'transfer-encoding', 
+      'content-length', 'upgrade', 'expect'
+    ];
     for (const [key, value] of Object.entries(req.headers)) {
       if (!value) continue;
+      if (forbiddenHeaders.includes(key.toLowerCase())) continue;
       const headerValue = Array.isArray(value) ? value.join(',') : value;
-      if (['host', 'x-forwarded-for', 'x-real-ip'].includes(key.toLowerCase())) continue;
       headers.set(key, headerValue);
     }
 
