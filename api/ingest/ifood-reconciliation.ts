@@ -163,12 +163,23 @@ async function handlePost(req: VercelRequest, res: VercelResponse) {
     let reportId: string | null = null;
 
     if (!requestResp.ok) {
-      // Tentar extrair requestId de erro "already a recent and valid request id"
-      const match = requestBody.match(/request\s+id[:\s]+([a-f0-9-]{36})/i);
-      if (match && match[1]) {
-        reportId = match[1];
-        await logToDb('warn', 'request', 'Reutilizando requestId existente', { reportId, reason: 'duplicate_request' });
-        console.info('[ifood-ingest] reusing_existing_request_id', { traceId, reportId, merchantId, competence });
+      const errorJson = parseJsonSafe<any>(requestBody) || {};
+      let extractedId: string | null = null;
+      const candidates = [
+        errorJson?.requestId,
+        errorJson?.normalizedRequestId,
+        errorJson?.id,
+        typeof errorJson?.details === 'string' ? (errorJson.details.match(/([a-f0-9-]{36})/i)?.[1] ?? null) : null,
+        typeof errorJson?.message === 'string' ? (errorJson.message.match(/([a-f0-9-]{36})/i)?.[1] ?? null) : null,
+        requestBody.match(/request\s+id[:\s]+([a-f0-9-]{36})/i)?.[1] ?? null,
+      ];
+      extractedId = candidates.find((val) => !!val) ?? null;
+
+      if (requestResp.status === 409 && extractedId) {
+        reportId = extractedId;
+        requestJson = errorJson;
+        await logToDb('warn', 'request', 'Reutilizando requestId existente', { reportId, reason: 'duplicate_request', payload: errorJson });
+        console.info('[ifood-ingest] reusing_existing_request_id', { traceId, reportId, merchantId, competence, payload: errorJson });
       } else {
         await logToDb('error', 'request', 'Falha ao solicitar relatório', { status: requestResp.status, body: requestBody.slice(0, 300) });
         await markError(`request_failed: ${requestBody}`, requestResp.status);
@@ -191,7 +202,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse) {
     let lastStatusPayload: any = null;
     let finalDownloadUrl: string | null = null;
     for (let attempts = 0; attempts < MAX_POLL_ATTEMPTS; attempts++) {
-      const downloadParams = new URLSearchParams({ action: 'download', merchantId, competence });
+      const downloadParams = new URLSearchParams({ action: 'download', merchantId, reportId, competence });
       const downloadResp = await fetch(`${selfBase}/api/ifood/reconciliation?${downloadParams.toString()}`, {
         headers: { Accept: 'text/csv,application/json,*/*', 'x-ifood-token': accessToken },
       });
