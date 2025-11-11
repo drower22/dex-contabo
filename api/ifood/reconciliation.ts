@@ -153,8 +153,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 2) Poll do request até obter download
     const fetchUrl = buildIFoodUrl(`/financial/v3.0/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand/${encodeURIComponent(requestId)}`);
-    const maxAttempts = 10;
-    const waitMs = 1500;
+    const maxAttempts = 20;
+    const waitMs = 3000;
     let downloadUrl: string | null = null;
     let lastStatus: number | null = null;
     let lastBodySnippet: string | null = null;
