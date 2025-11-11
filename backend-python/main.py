@@ -48,7 +48,7 @@ load_dotenv(dotenv_path=_BACKEND_ENV, override=False)
 
 # Configuração do Supabase
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 print(f"[DEBUG] SUPABASE_URL: {SUPABASE_URL if SUPABASE_URL else '[NÃO DEFINIDO]'}")
 if SUPABASE_KEY:
@@ -641,6 +641,13 @@ def run_processing_conciliacao(file_id: str, storage_path: str, layout_hint: str
         path_parts = storage_path.lstrip('/').split('/')
         bucket_name = path_parts[0]
         path_in_bucket = '/'.join(path_parts[1:])
+        
+        # Remove account_id prefix se presente (formato: account_id/2025-11/...)
+        # O Storage salva direto em 2025-11/... sem o account_id
+        if '/' in path_in_bucket and len(path_in_bucket.split('/')[0]) == 36:  # UUID tem 36 chars
+            path_in_bucket = '/'.join(path_in_bucket.split('/')[1:])
+            print(f"[CONCILIATION_TASK] Account ID removido do path. Novo path: '{path_in_bucket}'")
+        
         print(f"[CONCILIATION_TASK] Tentando download do bucket: '{bucket_name}', path: '{path_in_bucket}'")
         
         file_content = supabase_processor.storage.from_(bucket_name).download(path=path_in_bucket)
