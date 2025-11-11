@@ -115,6 +115,9 @@ const payoutsUnifiedHandler = loadHandler('./ifood-financial/payouts-unified');
 const reconciliationHandler = loadHandler('./ingest/ifood-reconciliation');
 const reconciliationDebugHandler = loadHandler('./ingest/ifood-reconciliation-debug');
 
+// Carregar handlers de APIs diretas do iFood
+const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation');
+
 // Montar rotas
 if (healthHandler) {
   app.get('/api/ifood-auth/health', adaptVercelHandler(healthHandler));
@@ -189,6 +192,15 @@ if (reconciliationHandler) {
 if (reconciliationDebugHandler) {
   app.get('/api/ingest/ifood-reconciliation-debug', adaptVercelHandler(reconciliationDebugHandler));
   console.log('✅ Reconciliation debug handler loaded');
+}
+
+if (ifoodReconciliationHandler) {
+  app.all('/api/ifood/reconciliation', adaptVercelHandler(ifoodReconciliationHandler));
+  console.log('✅ iFood reconciliation API handler loaded');
+} else {
+  app.all('/api/ifood/reconciliation', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'iFood reconciliation handler not loaded' });
+  });
 }
 
 // 404 handler
