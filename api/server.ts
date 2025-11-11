@@ -118,6 +118,58 @@ const reconciliationDebugHandler = loadHandler('./ingest/ifood-reconciliation-de
 // Carregar handlers de APIs diretas do iFood
 const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation');
 
+// Proxy para iFood usando a função Vercel compartilhada
+app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
+  const base = process.env.IFOOD_PROXY_BASE?.trim();
+  const sharedKey = process.env.IFOOD_PROXY_KEY?.trim();
+
+  if (!base || !sharedKey) {
+    return res.status(500).json({
+      error: 'ifood_proxy_not_configured',
+      details: 'Defina IFOOD_PROXY_BASE e IFOOD_PROXY_KEY no .env do Contabo.'
+    });
+  }
+
+  try {
+    const parsedBase = new URL(base);
+    const pathParam = req.query.path || req.query.PATH || req.query.url;
+    const normalizedPath = typeof pathParam === 'string' && pathParam.length > 0
+      ? pathParam.startsWith('/') ? pathParam : `/${pathParam}`
+      : '/health';
+
+    parsedBase.searchParams.set('path', normalizedPath);
+    const upstreamUrl = parsedBase.toString();
+
+    const headers = new Headers();
+    headers.set('x-shared-key', sharedKey);
+    // Replicar cabeçalhos relevantes
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (!value) continue;
+      const headerValue = Array.isArray(value) ? value.join(',') : value;
+      if (['host', 'x-forwarded-for', 'x-real-ip'].includes(key.toLowerCase())) continue;
+      headers.set(key, headerValue);
+    }
+
+    const init: RequestInit = {
+      method: req.method,
+      headers,
+      body: ['GET', 'HEAD'].includes(req.method) ? undefined : req.body ? JSON.stringify(req.body) : undefined,
+    };
+
+    const upstreamResp = await fetch(upstreamUrl, init);
+    const text = await upstreamResp.text();
+
+    res.status(upstreamResp.status);
+    for (const [key, value] of upstreamResp.headers.entries()) {
+      res.setHeader(key, value);
+    }
+    res.send(text);
+  } catch (err: any) {
+    console.error('[ifood-proxy] error', err);
+    res.status(500).json({ error: 'proxy_failure', message: err?.message || String(err) });
+  }
+});
+
 // Montar rotas
 if (healthHandler) {
   app.get('/api/ifood-auth/health', adaptVercelHandler(healthHandler));
