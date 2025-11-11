@@ -189,7 +189,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse) {
     let lastStatusPayload: any = null;
     let finalDownloadUrl: string | null = null;
     for (let attempts = 0; attempts < MAX_POLL_ATTEMPTS; attempts++) {
-      const downloadParams = new URLSearchParams({ action: 'download', merchantId, reportId });
+      const downloadParams = new URLSearchParams({ action: 'download', merchantId, competence });
       const downloadResp = await fetch(`${selfBase}/api/ifood/reconciliation?${downloadParams.toString()}`, {
         headers: { Accept: 'text/csv,application/json,*/*', 'x-ifood-token': accessToken },
       });
