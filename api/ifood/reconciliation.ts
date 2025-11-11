@@ -87,6 +87,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const baseHeaders: Record<string, string> = {
       Accept: 'application/json',
       Authorization: `Bearer ${token}`,
+      'User-Agent': 'curl/8.5.0',
+      'Accept-Encoding': 'gzip, deflate, br',
     };
     const homo = (req.headers['x-request-homologation'] || '').toString().trim().toLowerCase();
     if (homo === 'true' || homo === '1') baseHeaders['x-request-homologation'] = 'true';
