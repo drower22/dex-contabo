@@ -324,7 +324,7 @@ async function handlePost(req: VercelRequest, res: VercelResponse) {
             error: errorText 
           });
         } else {
-          const result = await response.json();
+          const result = await response.json() as { inserted?: number; errors?: any[] };
           await logToDb('info', 'processing', 'Arquivo processado com sucesso', { 
             fileId,
             inserted: result.inserted,
