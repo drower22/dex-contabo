@@ -31,6 +31,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import zlib from 'zlib';
+import { withIFoodProxy } from '../_shared/proxy';
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*';
 const cors = {
@@ -105,14 +106,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 1) Solicitar conciliação on-demand (POST) e obter requestId - APENAS se não tiver reportId
     if (!requestId) {
       const generateUrl = `${IFOOD_FINANCIAL_V3}/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand`;
-      const generateResp = await fetch(generateUrl, {
+      const generateResp = await fetch(generateUrl, withIFoodProxy({
         method: 'POST',
         headers: {
           ...baseHeaders,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ competence: finalCompetence }),
-      });
+      }));
       console.info('[ifood-reconciliation] POST generate', { traceId, generateUrl, merchantId, competence: finalCompetence });
 
       const generateText = await generateResp.text().catch(() => '');
@@ -159,7 +160,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let lastBodySnippet: string | null = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const pollResp = await fetch(fetchUrl, { headers: baseHeaders });
+      const pollResp = await fetch(fetchUrl, withIFoodProxy({ headers: baseHeaders }));
       lastStatus = pollResp.status;
       const pollText = await pollResp.text().catch(() => '');
       lastBodySnippet = pollText.slice(0, 500);
@@ -201,7 +202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 3) Baixar .gz
     console.info('[ifood-reconciliation] download_start', { traceId, downloadUrl });
-    const fileResp = await fetch(downloadUrl, { headers: baseHeaders });
+    const fileResp = await fetch(downloadUrl, withIFoodProxy({ headers: baseHeaders }));
     if (!fileResp.ok) {
       const body = await fileResp.text().catch(() => '');
       console.error('[ifood-reconciliation] download_fetch_failed', { traceId, status: fileResp.status, downloadUrl, snippet: body.slice(0, 300) });
