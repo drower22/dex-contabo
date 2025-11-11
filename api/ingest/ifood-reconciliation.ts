@@ -98,9 +98,8 @@ async function handlePost(req: VercelRequest, res: VercelResponse) {
     await logToDb('info', 'validation', 'MerchantId resolvido', { merchantId, accountId });
 
     const trigger = (triggerSource as string) ?? 'manual_topbar';
-    const host = ((req.headers as any)['x-forwarded-host'] || (req.headers as any)['host'] || 'localhost:5173').toString();
-    const proto = ((req.headers as any)['x-forwarded-proto'] || 'http').toString();
-    const selfBase = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `${proto}://${host}`;
+    // Usar a URL da API configurada em vez de construir a partir dos headers
+    const selfBase = process.env.API_BASE_URL || process.env.CONTABO_API_URL || 'https://api.usa-dex.com.br';
 
     const nowIso = new Date().toISOString();
     const persistRun = async (patch: Record<string, any>) => {
