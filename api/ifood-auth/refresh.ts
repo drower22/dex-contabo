@@ -20,8 +20,8 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import axios from 'axios';
 import { decryptFromB64, encryptToB64 } from '../_shared/crypto';
-import { buildIFoodUrl, withIFoodProxy } from '../_shared/proxy';
 
 // Rota dedicada para refresh de token, garantindo que o método POST seja aceito.
 
@@ -143,12 +143,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const url = buildIFoodUrl('/authentication/v1.0/oauth/token');
     let response: Response;
     try {
       console.log('[ifood-auth/refresh] Calling iFood OAuth', {
         traceId,
-        url,
         scope,
         wantedScope,
         internalAccountId,
@@ -157,26 +155,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const proxyUrl = new URL(process.env.IFOOD_PROXY_BASE!)
       proxyUrl.searchParams.set('path', '/authentication/v1.0/oauth/token')
 
-      response = await fetch(proxyUrl.toString(), {
-        method: 'POST',
+      const requestBody = new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: clientId!,
+        client_secret: clientSecret!,
+        refresh_token: refreshToken,
+      });
+
+      const axiosResponse = await axios.post(proxyUrl.toString(), requestBody, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'x-shared-key': process.env.IFOOD_PROXY_KEY!,
         },
-        body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          client_id: clientId!,
-          client_secret: clientSecret!,
-          refresh_token: refreshToken,
-        }),
       });
-    } catch (fetchError: any) {
-      console.error('[ifood-auth/refresh] Fetch error calling OAuth', {
-        traceId,
-        error: fetchError?.message,
-        stack: fetchError?.stack,
+      response = new Response(JSON.stringify(axiosResponse.data), {
+        status: axiosResponse.status,
+        headers: axiosResponse.headers as any,
       });
-      throw new Error(`Failed to call iFood OAuth: ${fetchError?.message ?? 'unknown error'}`);
+    } catch (error: any) {
+      if (axios.isAxiosError(error)) {
+        console.error('[ifood-auth/refresh] Axios error calling OAuth', {
+          traceId,
+          status: error.response?.status,
+          data: error.response?.data,
+          message: error.message,
+        });
+        // Re-throw as a standard error to be caught by the outer handler
+        throw new Error(`Failed to call iFood OAuth: ${error.message}`);
+      } else {
+        console.error('[ifood-auth/refresh] Generic error calling OAuth', {
+          traceId,
+          error: error?.message,
+          stack: error?.stack,
+        });
+        throw new Error(`Failed to call iFood OAuth: ${error?.message ?? 'unknown error'}`);
+      }
     }
 
     console.log('[ifood-auth/refresh] OAuth response metadata', {
