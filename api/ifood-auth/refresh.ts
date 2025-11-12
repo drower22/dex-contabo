@@ -154,16 +154,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         internalAccountId,
       });
 
-      response = await fetch(url, withIFoodProxy({
+      const proxyUrl = new URL(process.env.IFOOD_PROXY_BASE!)
+      proxyUrl.searchParams.set('path', '/authentication/v1.0/oauth/token')
+
+      response = await fetch(proxyUrl.toString(), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'x-shared-key': process.env.IFOOD_PROXY_KEY!,
+        },
         body: new URLSearchParams({
           grant_type: 'refresh_token',
           client_id: clientId!,
           client_secret: clientSecret!,
           refresh_token: refreshToken,
         }),
-      }));
+      });
     } catch (fetchError: any) {
       console.error('[ifood-auth/refresh] Fetch error calling OAuth', {
         traceId,
