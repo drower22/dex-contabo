@@ -173,28 +173,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       throw new Error(`Failed to call iFood OAuth: ${fetchError?.message ?? 'unknown error'}`);
     }
 
-    const tokenData: any = await response.json().catch((parseError: any) => {
+    const rawBody = await response.text();
+    let tokenData: any = null;
+    try {
+      tokenData = rawBody ? JSON.parse(rawBody) : null;
+    } catch (parseError: any) {
       console.error('[ifood-auth/refresh] Failed to parse OAuth response', {
         traceId,
         status: response.status,
         error: parseError?.message,
+        rawPreview: rawBody?.slice(0, 300),
       });
-      throw new Error(`Failed to parse OAuth response (${response.status})`);
-    });
+      if (response.ok) {
+        throw new Error(`Failed to parse OAuth response (${response.status})`);
+      }
+    }
 
     console.log('[ifood-auth/refresh] OAuth response received', {
       traceId,
       status: response.status,
       keys: tokenData ? Object.keys(tokenData) : null,
+      rawLength: rawBody?.length ?? 0,
     });
 
     if (!response.ok) {
       console.warn('[ifood-auth/refresh] OAuth request failed', {
         traceId,
         status: response.status,
-        tokenData,
+        tokenData: tokenData ?? rawBody,
       });
-      return res.status(response.status).json({ error: 'Falha ao renovar token com iFood', details: tokenData });
+      return res.status(response.status).json({
+        error: 'Falha ao renovar token com iFood',
+        details: tokenData ?? rawBody,
+      });
+    }
+
+    if (!tokenData) {
+      throw new Error(`OAuth response vazia (${response.status})`);
     }
 
     await supabase
