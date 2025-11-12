@@ -108,7 +108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       const response = await axios.post(url, requestBody, {
         headers: Object.fromEntries(
-          (withIFoodProxy({ headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }).headers as Headers).entries()
+          (withIFoodProxy({ headers: {} }).headers as Headers).entries()
         ),
         responseType: 'json',
       });
