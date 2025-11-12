@@ -162,16 +162,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         refresh_token: refreshToken,
       });
 
-      const axiosResponse = await axios.post(proxyUrl.toString(), requestBody, {
+      const { data, status, headers } = await axios.post(proxyUrl.toString(), requestBody, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'x-shared-key': process.env.IFOOD_PROXY_KEY!,
         },
+        responseType: 'json',
       });
-      response = new Response(JSON.stringify(axiosResponse.data), {
-        status: axiosResponse.status,
-        headers: axiosResponse.headers as any,
-      });
+      response = new Response(JSON.stringify(data), { status, headers: headers as any });
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
         console.error('[ifood-auth/refresh] Axios error calling OAuth', {
