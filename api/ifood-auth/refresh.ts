@@ -164,7 +164,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data } = await axios.post(proxyUrl.toString(), requestBody, {
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
           'x-shared-key': process.env.IFOOD_PROXY_KEY!,
         },
         responseType: 'json',
