@@ -5,6 +5,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { buildIFoodUrl, withIFoodProxy } from '../_shared/proxy';
+import axios from 'axios';
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
 
@@ -103,35 +104,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     const url = buildIFoodUrl('/authentication/v1.0/oauth/userCode');
-    const response = await fetch(url, withIFoodProxy({
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: requestBody,
-    }));
-
-    console.log('[ifood-auth/link] 📥 iFood API response:', {
-      status: response.status,
-      statusText: response.statusText,
-      ok: response.ok,
-      headers: Object.fromEntries(response.headers.entries())
-    });
-
-    const data: any = await response.json();
-    console.log('[ifood-auth/link] 📥 iFood API response body:', JSON.stringify(data, null, 2));
-
-    if (!response.ok) {
-      console.log('[ifood-auth/link] ❌ iFood API returned error');
-      return res.status(response.status).json({ 
-        error: 'Falha ao solicitar código de autorização', 
-        details: data,
-        debug: {
-          scope,
-          clientIdUsed: `${clientId.substring(0, 8)}...`,
-          ifoodStatus: response.status
-        }
+    let data: any;
+    try {
+      const response = await axios.post(url, requestBody, {
+        headers: Object.fromEntries(
+          (withIFoodProxy({ headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }).headers as Headers).entries()
+        ),
+        responseType: 'json',
       });
+      data = response.data;
+      console.log('[ifood-auth/link] ✅ iFood API response body:', JSON.stringify(data, null, 2));
+    } catch (error: any) {
+      if (axios.isAxiosError(error)) {
+        console.error('[ifood-auth/link] ❌ Axios error calling iFood API', {
+          traceId,
+          status: error.response?.status,
+          data: error.response?.data,
+          message: error.message,
+        });
+        return res.status(error.response?.status || 500).json({ 
+          error: 'Falha ao solicitar código de autorização do iFood',
+          details: error.response?.data 
+        });
+      } else {
+        console.error('[ifood-auth/link] ❌ Generic error calling iFood API', {
+          traceId,
+          error: error?.message,
+        });
+        throw error;
+      }
     }
 
     await supabase
