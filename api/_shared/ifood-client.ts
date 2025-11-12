@@ -49,7 +49,7 @@ export class IFoodClient {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({ clientId }),
+      body: new URLSearchParams({ client_id: clientId }),
     });
 
     if (!response.ok) {
@@ -78,11 +78,11 @@ export class IFoodClient {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({
-        grantType: 'authorization_code',
-        clientId,
-        clientSecret,
-        authorizationCode,
-        authorizationCodeVerifier,
+        grant_type: 'authorization_code',
+        client_id: clientId,
+        client_secret: clientSecret,
+        authorization_code: authorizationCode,
+        authorization_code_verifier: authorizationCodeVerifier,
       }),
     });
 
@@ -108,10 +108,10 @@ export class IFoodClient {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({
-        grantType: 'refresh_token',
-        clientId,
-        clientSecret,
-        refreshToken,
+        grant_type: 'refresh_token',
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
       }),
     });
 
