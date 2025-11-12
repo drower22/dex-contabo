@@ -11,16 +11,8 @@ function normalizePath(path: string): string {
 }
 
 export function buildIFoodUrl(path: string): string {
-  const { base } = getProxyConfig();
   const normalized = normalizePath(path);
-
-  if (!base) {
-    return `${DEFAULT_IFOOD_BASE}${normalized}`;
-  }
-
-  const url = new URL(base);
-  url.searchParams.set('path', normalized);
-  return url.toString();
+  return `${DEFAULT_IFOOD_BASE}${normalized}`;
 }
 
 export function proxifyIFoodUrl(url: string): string {
@@ -37,12 +29,7 @@ export function proxifyIFoodUrl(url: string): string {
 }
 
 export function withIFoodProxy(init?: RequestInit): RequestInit {
-  const { base, key } = getProxyConfig();
   const headers = new Headers(init?.headers ?? {});
-
-  if (base && key) {
-    headers.set('x-shared-key', key);
-  }
 
   // Remover headers que causam erro no fetch do Node.js
   const forbiddenHeaders = [
