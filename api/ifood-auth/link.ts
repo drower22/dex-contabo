@@ -107,11 +107,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let data: any;
     try {
       const proxyHeaders = withIFoodProxy({ headers: { 'Accept-Encoding': 'identity' } }).headers as Headers;
-      const response = await axios.post(url, requestBody, {
+      const response = await axios.post<string>(url, requestBody, {
         headers: Object.fromEntries(proxyHeaders.entries()),
-        responseType: 'json',
+        responseType: 'text',
+        transformResponse: [(value) => value],
+        validateStatus: () => true,
       });
-      data = response.data;
+
+      const rawBody = response.data ?? '';
+      let parsedBody: any = rawBody;
+      try {
+        parsedBody = rawBody ? JSON.parse(rawBody) : rawBody;
+      } catch {
+        // Mantém como texto
+      }
+
+      console.log('[ifood-auth/link] 📥 iFood API response:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        rawBody,
+        parsedType: typeof parsedBody,
+      });
+
+      if (response.status >= 400) {
+        console.warn('[ifood-auth/link] ❌ iFood API returned non-2xx', { traceId, status: response.status, rawBody });
+        return res.status(response.status).json({
+          error: 'Falha ao solicitar código de autorização do iFood',
+          details: parsedBody || rawBody,
+        });
+      }
+
+      data = parsedBody;
       console.log('[ifood-auth/link] ✅ iFood API response body:', JSON.stringify(data, null, 2));
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
