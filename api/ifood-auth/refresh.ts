@@ -143,7 +143,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    let response: Response;
+    let tokenData: any;
     try {
       console.log('[ifood-auth/refresh] Calling iFood OAuth', {
         traceId,
@@ -162,14 +162,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         refresh_token: refreshToken,
       });
 
-      const { data, status, headers } = await axios.post(proxyUrl.toString(), requestBody, {
+      const { data } = await axios.post(proxyUrl.toString(), requestBody, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'x-shared-key': process.env.IFOOD_PROXY_KEY!,
         },
         responseType: 'json',
       });
-      response = new Response(JSON.stringify(data), { status, headers: headers as any });
+      tokenData = data;
+
+      console.log('[ifood-auth/refresh] OAuth request successful', {
+        traceId,
+        keys: tokenData ? Object.keys(tokenData) : null,
+      });
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
         console.error('[ifood-auth/refresh] Axios error calling OAuth', {
@@ -178,74 +183,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           data: error.response?.data,
           message: error.message,
         });
-        // Re-throw as a standard error to be caught by the outer handler
-        throw new Error(`Failed to call iFood OAuth: ${error.message}`);
+        return res.status(error.response?.status || 500).json({ 
+          error: 'Falha ao renovar token com iFood', 
+          details: error.response?.data 
+        });
       } else {
         console.error('[ifood-auth/refresh] Generic error calling OAuth', {
           traceId,
           error: error?.message,
           stack: error?.stack,
         });
-        throw new Error(`Failed to call iFood OAuth: ${error?.message ?? 'unknown error'}`);
+        throw error;
       }
-    }
-
-    console.log('[ifood-auth/refresh] OAuth response metadata', {
-      traceId,
-      status: response.status,
-      ok: response.ok,
-      headers: Object.fromEntries(response.headers.entries()),
-    });
-
-    let rawBody: string | null = null;
-    try {
-      rawBody = await response.text();
-    } catch (readError: any) {
-      console.error('[ifood-auth/refresh] Failed to read OAuth response body', {
-        traceId,
-        status: response.status,
-        error: readError?.message,
-        stack: readError?.stack,
-      });
-      throw new Error(`Failed to read OAuth response body (${response.status}): ${readError?.message}`);
-    }
-
-    let tokenData: any = null;
-    try {
-      tokenData = rawBody ? JSON.parse(rawBody) : null;
-    } catch (parseError: any) {
-      console.error('[ifood-auth/refresh] Failed to parse OAuth response', {
-        traceId,
-        status: response.status,
-        error: parseError?.message,
-        rawPreview: rawBody?.slice(0, 300),
-      });
-      if (response.ok) {
-        throw new Error(`Failed to parse OAuth response (${response.status})`);
-      }
-    }
-
-    console.log('[ifood-auth/refresh] OAuth response received', {
-      traceId,
-      status: response.status,
-      keys: tokenData ? Object.keys(tokenData) : null,
-      rawLength: rawBody?.length ?? 0,
-    });
-
-    if (!response.ok) {
-      console.warn('[ifood-auth/refresh] OAuth request failed', {
-        traceId,
-        status: response.status,
-        tokenData: tokenData ?? rawBody,
-      });
-      return res.status(response.status).json({
-        error: 'Falha ao renovar token com iFood',
-        details: tokenData ?? rawBody,
-      });
-    }
-
-    if (!tokenData) {
-      throw new Error(`OAuth response vazia (${response.status})`);
     }
 
     await supabase
