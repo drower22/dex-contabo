@@ -275,12 +275,32 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 Dex Contabo API (TypeScript) running on http://localhost:${PORT}`);
   console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 CORS Origin: ${process.env.CORS_ORIGIN || '*'}`);
   console.log(`✅ Health check: http://localhost:${PORT}/api/health`);
   console.log(`🔷 TypeScript: Enabled via ts-node`);
+});
+
+server.on('error', (error: NodeJS.ErrnoException) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error('❌ Failed to start Dex Contabo API: port already in use', {
+      port: PORT,
+      pid: process.pid,
+      message: error.message,
+    });
+    console.error('👉 Dica: execute "sudo lsof -i :%s -nP" para identificar o processo e finalize-o com "sudo kill -9 <PID>".', PORT);
+  } else {
+    console.error('❌ Server listen error', {
+      port: PORT,
+      pid: process.pid,
+      code: error.code,
+      message: error.message,
+    });
+  }
+
+  process.exit(1);
 });
 
 // Graceful shutdown
