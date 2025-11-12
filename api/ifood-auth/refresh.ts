@@ -173,7 +173,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       throw new Error(`Failed to call iFood OAuth: ${fetchError?.message ?? 'unknown error'}`);
     }
 
-    const rawBody = await response.text();
+    console.log('[ifood-auth/refresh] OAuth response metadata', {
+      traceId,
+      status: response.status,
+      ok: response.ok,
+      headers: Object.fromEntries(response.headers.entries()),
+    });
+
+    let rawBody: string | null = null;
+    try {
+      rawBody = await response.text();
+    } catch (readError: any) {
+      console.error('[ifood-auth/refresh] Failed to read OAuth response body', {
+        traceId,
+        status: response.status,
+        error: readError?.message,
+        stack: readError?.stack,
+      });
+      throw new Error(`Failed to read OAuth response body (${response.status}): ${readError?.message}`);
+    }
+
     let tokenData: any = null;
     try {
       tokenData = rawBody ? JSON.parse(rawBody) : null;
