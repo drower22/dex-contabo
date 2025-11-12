@@ -133,7 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let tokenData: any;
     try {
       const response = await axios.post(url, requestBody, {
-        headers: { 'Accept-Encoding': 'identity' }, // Evita compressão
+        headers: { 'Accept-Encoding': 'identity' },
         responseType: 'json',
       });
       tokenData = response.data;
