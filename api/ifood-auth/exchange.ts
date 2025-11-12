@@ -19,6 +19,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { encryptToB64 } from '../_shared/crypto';
 import { buildIFoodUrl, withIFoodProxy } from '../_shared/proxy';
+import axios from 'axios';
 
 // Rota dedicada para trocar o código de autorização por tokens.
 
@@ -121,33 +122,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     const url = buildIFoodUrl('/authentication/v1.0/oauth/token');
-    const response = await fetch(url, withIFoodProxy({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        client_id: clientId!,
-        client_secret: clientSecret!,
-        authorization_code: authorizationCode,
-        authorization_code_verifier: authorizationCodeVerifier,
-      }),
-    }));
+    const requestBody = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: clientId!,
+      client_secret: clientSecret!,
+      authorization_code: authorizationCode,
+      authorization_code_verifier: authorizationCodeVerifier,
+    });
 
-    const tokenData: any = await response.json();
+    let tokenData: any;
+    try {
+      const response = await axios.post(url, requestBody, {
+        headers: { 'Accept-Encoding': 'identity' }, // Evita compressão
+        responseType: 'json',
+      });
+      tokenData = response.data;
+    } catch (error: any) { 
+      if (axios.isAxiosError(error)) {
+        console.error('[ifood-auth/exchange] ❌ Axios error calling iFood API', {
+          status: error.response?.status,
+          data: error.response?.data,
+          message: error.message,
+        });
+        return res.status(error.response?.status || 500).json({ 
+          error: 'Falha ao trocar código por token',
+          details: error.response?.data 
+        });
+      } else {
+        console.error('[ifood-auth/exchange] ❌ Generic error calling iFood API', {
+          error: error?.message,
+        });
+        throw error;
+      }
+    }
+
+    // Remapeia campos para consistência (iFood retorna camelCase)
+    tokenData.accessToken = tokenData.accessToken || tokenData.access_token;
+    tokenData.refreshToken = tokenData.refreshToken || tokenData.refresh_token;
+    tokenData.expiresIn = tokenData.expiresIn || tokenData.expires_in;
 
     console.log('[ifood-auth/exchange] 📥 iFood response:', {
-      status: response.status,
-      ok: response.ok,
       hasAccessToken: !!tokenData.accessToken,
       hasRefreshToken: !!tokenData.refreshToken,
       hasExpiresIn: !!tokenData.expiresIn,
       merchantIdFromResponse: tokenData.merchantId || tokenData.merchantID || tokenData.merchant_id || null
     });
-
-    if (!response.ok) {
-      console.error('[ifood-auth/exchange] ❌ iFood exchange failed:', tokenData);
-      return res.status(response.status).json({ error: 'Falha ao trocar código por token', details: tokenData });
-    }
 
     // Try to resolve merchantId from token response or fallback to /merchants/me
     let merchantId: string | undefined = tokenData.merchantId
