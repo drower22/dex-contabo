@@ -18,6 +18,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { encryptToB64 } from '../_shared/crypto';
+import { withCors } from '../_shared/cors';
 import { buildIFoodUrl, withIFoodProxy } from '../_shared/proxy';
 import axios from 'axios';
 
@@ -30,17 +31,10 @@ const supabase = createClient(
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise<void> => {
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+    res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   const scopeParam = (req.query.scope as string) || req.body?.scope;
@@ -56,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   if ((!bodyStoreId && !bodyMerchantId) || !authorizationCode || !authorizationCodeVerifier) {
-    return res.status(400).json({ error: 'Informe storeId (UUID interno) ou merchantId, além de authorizationCode e authorizationCodeVerifier.' });
+    res.status(400).json({ error: 'Informe storeId (UUID interno) ou merchantId, além de authorizationCode e authorizationCodeVerifier.' });
   }
 
   try {
@@ -90,7 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!resolvedAccountId) {
       console.error('[ifood-auth/exchange] ❌ Account not found');
-      return res.status(404).json({ error: 'Conta não encontrada para o storeId/merchantId informado.' });
+      res.status(404).json({ error: 'Conta não encontrada para o storeId/merchantId informado.' });
     }
 
     console.log('[ifood-auth/exchange] ✅ Account resolved:', { resolvedAccountId, existingMerchantId });
@@ -109,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : undefined;
 
     if (!clientId || !clientSecret) {
-      return res.status(400).json({ 
+      res.status(400).json({ 
         error: 'Missing client credentials',
         message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} or SECRET not configured`
       });
@@ -144,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           data: error.response?.data,
           message: error.message,
         });
-        return res.status(error.response?.status || 500).json({ 
+        res.status(error.response?.status || 500).json({ 
           error: 'Falha ao trocar código por token',
           details: error.response?.data 
         });
@@ -293,3 +287,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(500).json({ error: 'Erro interno no servidor', message: e.message });
   }
 }
+
+export default withCors(exchangeHandler);

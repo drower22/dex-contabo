@@ -22,6 +22,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { decryptFromB64 } from '../_shared/crypto';
+import { withCors } from '../_shared/cors';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -30,27 +31,20 @@ const supabase = createClient(
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+const statusHandler = async (req: VercelRequest, res: VercelResponse): Promise<void> => {
 
   if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+    res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   const { accountId, scope } = req.query;
 
   if (!accountId || typeof accountId !== 'string') {
-    return res.status(400).json({ error: 'Missing or invalid accountId parameter' });
+    res.status(400).json({ error: 'Missing or invalid accountId parameter' });
   }
 
   if (!scope || (scope !== 'reviews' && scope !== 'financial')) {
-    return res.status(400).json({ error: 'Missing or invalid scope parameter. Must be "reviews" or "financial"' });
+    res.status(400).json({ error: 'Missing or invalid scope parameter. Must be "reviews" or "financial"' });
   }
 
   try {
@@ -64,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (error) {
       console.error('[ifood-auth/status] Supabase error:', error);
-      return res.status(500).json({ 
+      res.status(500).json({ 
         status: 'error', 
         message: 'Database query failed',
         error: error.message 
@@ -73,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Se não há registro, status é 'pending' (apenas resposta; não persiste)
     if (!data || !data.access_token) {
-      return res.status(200).json({ 
+      res.status(200).json({ 
         status: 'pending',
         message: 'No authentication record found for this account and scope'
       });
@@ -85,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       accessToken = await decryptFromB64(data.access_token);
     } catch (decryptError) {
       console.error('[ifood-auth/status] Failed to decrypt token:', decryptError);
-      return res.status(200).json({ 
+      res.status(200).json({ 
         status: 'pending',
         message: 'Token encrypted with legacy scheme or invalid. Please re-link.'
       });
@@ -105,7 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (ifoodResponse.ok) {
         // Token válido! API do iFood respondeu com sucesso
-        const merchantData = await ifoodResponse.json();
+        const merchantData: { id?: string } = await ifoodResponse.json();
         // Persistir conectado e merchant id (quando disponível)
         try {
           await supabase
@@ -114,7 +108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .eq('account_id', String(accountId))
             .eq('scope', String(scope));
         } catch {}
-        return res.status(200).json({ 
+        res.status(200).json({ 
           status: 'connected',
           message: 'Token validated successfully with iFood API',
           merchantId: merchantData?.id || data.ifood_merchant_id
@@ -123,7 +117,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Token inválido ou expirado: apenas responde, não altera o status salvo
       if (ifoodResponse.status === 401 || ifoodResponse.status === 403) {
-        return res.status(200).json({ 
+        res.status(200).json({ 
           status: 'pending',
           message: 'Token expired or revoked. Please reconnect.',
           httpStatus: ifoodResponse.status
@@ -132,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Outros erros da API iFood: apenas responde, não altera o status salvo
       console.error('[ifood-auth/status] iFood API error:', ifoodResponse.status);
-      return res.status(200).json({ 
+      res.status(200).json({ 
         status: 'error',
         message: `iFood API returned ${ifoodResponse.status}`,
         httpStatus: ifoodResponse.status
@@ -141,7 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (ifoodError: any) {
       // Erro de rede ou timeout ao chamar API iFood
       console.error('[ifood-auth/status] Failed to call iFood API:', ifoodError);
-      return res.status(200).json({ 
+      res.status(200).json({ 
         status: 'error',
         message: 'Failed to validate token with iFood API',
         error: ifoodError.message
@@ -150,10 +144,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (e: any) {
     console.error('[ifood-auth/status] Exception:', e);
-    return res.status(500).json({ 
+    res.status(500).json({ 
       status: 'error',
       message: 'Internal server error',
       error: e.message 
     });
   }
 }
+
+export default withCors(statusHandler);

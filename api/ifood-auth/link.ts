@@ -4,6 +4,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { withCors } from '../_shared/cors';
 import { buildIFoodUrl, withIFoodProxy } from '../_shared/proxy';
 import axios from 'axios';
 
@@ -14,25 +15,17 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<void> => {
   console.log('\n========== [LINK] INÍCIO DA REQUISIÇÃO ==========');
   console.log('[LINK] 📥 Method:', req.method);
   console.log('[LINK] 📥 URL:', req.url);
   console.log('[LINK] 📥 Query:', JSON.stringify(req.query, null, 2));
   console.log('[LINK] 📥 Body:', JSON.stringify(req.body, null, 2));
   
-  res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    console.log('[LINK] ✅ OPTIONS request - returning 200');
-    return res.status(200).end();
-  }
 
   if (req.method !== 'POST') {
     console.log('[LINK] ❌ Method not allowed:', req.method);
-    return res.status(405).json({ error: 'Method Not Allowed' });
+    res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   const scopeParam = (req.query.scope as string) || req.body?.scope;
@@ -44,7 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (!accountId) {
       console.warn('[ifood-auth/link] Missing accountId', { traceId, body: req.body });
-      return res.status(400).json({ error: 'accountId (ID interno) é obrigatório' });
+      res.status(400).json({ error: 'accountId (ID interno) é obrigatório' });
     }
 
     const { data: account } = await supabase
@@ -55,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!account?.id) {
       console.warn('[ifood-auth/link] Account not found', { traceId, accountId });
-      return res.status(404).json({ error: 'Conta não encontrada para o accountId informado' });
+      res.status(404).json({ error: 'Conta não encontrada para o accountId informado' });
     }
 
     // Garante que o merchantId seja salvo no primeiro vínculo
@@ -86,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!clientId) {
       console.log('[ifood-auth/link] ❌ Missing client credentials for scope:', scope);
-      return res.status(400).json({ 
+      res.status(400).json({ 
         error: 'Missing client credentials',
         message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} not configured`
       });
@@ -132,7 +125,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (response.status >= 400) {
         console.warn('[ifood-auth/link] ❌ iFood API returned non-2xx', { traceId, status: response.status, rawBody });
-        return res.status(response.status).json({
+        res.status(response.status).json({
           error: 'Falha ao solicitar código de autorização do iFood',
           details: parsedBody || rawBody,
         });
@@ -148,7 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           data: error.response?.data,
           message: error.message,
         });
-        return res.status(error.response?.status || 500).json({ 
+        res.status(error.response?.status || 500).json({ 
           error: 'Falha ao solicitar código de autorização do iFood',
           details: error.response?.data 
         });
@@ -193,3 +186,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('[ifood-auth/link] ⇢ end', { traceId, accountId, merchantId, scope });
   }
 }
+
+export default withCors(linkHandler);
