@@ -36,25 +36,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const scopeParam = (req.query.scope as string) || req.body?.scope;
   const scope = scopeParam === 'financial' ? 'financial' : (scopeParam === 'reviews' ? 'reviews' : undefined);
-  const { storeId } = req.body;
+  const { accountId, merchantId } = req.body;
   const traceId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  console.log('[ifood-auth/link] ⇢ start', { traceId, storeId, scopeParam, scope });
+  console.log('[ifood-auth/link] ⇢ start', { traceId, accountId, merchantId, scopeParam, scope });
 
   try {
-    if (!storeId) {
-      console.warn('[ifood-auth/link] Missing storeId', { traceId, body: req.body });
-      return res.status(400).json({ error: 'storeId (merchant_id) é obrigatório' });
+    if (!accountId) {
+      console.warn('[ifood-auth/link] Missing accountId', { traceId, body: req.body });
+      return res.status(400).json({ error: 'accountId (ID interno) é obrigatório' });
     }
 
     const { data: account } = await supabase
       .from('accounts')
       .select('id, ifood_merchant_id')
-      .eq('ifood_merchant_id', storeId)
+      .eq('id', accountId)
       .single();
 
     if (!account?.id) {
-      console.warn('[ifood-auth/link] Account not found', { traceId, storeId });
-      return res.status(404).json({ error: 'Conta não encontrada para o storeId informado' });
+      console.warn('[ifood-auth/link] Account not found', { traceId, accountId });
+      return res.status(404).json({ error: 'Conta não encontrada para o accountId informado' });
+    }
+
+    // Garante que o merchantId seja salvo no primeiro vínculo
+    if (merchantId) {
+      const { error: upsertError } = await supabase
+        .from('ifood_store_auth')
+        .upsert({ account_id: account.id, ifood_merchant_id: merchantId, scope: scope || 'reviews' }, { onConflict: 'account_id,scope' });
+
+      if (upsertError) {
+        console.error('[ifood-auth/link] Error saving merchantId', { traceId, upsertError });
+        // Não bloqueia o fluxo, mas loga o erro
+      }
     }
 
     // Usar apenas variáveis específicas por scope (sem fallback genérico)
@@ -151,6 +163,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       details: error?.stack?.split('\n')[0] || 'Unknown error',
     });
   } finally {
-    console.log('[ifood-auth/link] ⇢ end', { traceId, storeId, scope });
+    console.log('[ifood-auth/link] ⇢ end', { traceId, accountId, merchantId, scope });
   }
 }
