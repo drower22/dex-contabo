@@ -49,8 +49,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const scope = scopeParam === 'financial' ? 'financial' : (scopeParam === 'reviews' ? 'reviews' : undefined);
   const { storeId } = req.body; // pode ser ifood_merchant_id (padrão) OU accounts.id (UUID)
   if (!storeId) {
+    console.warn('[ifood-auth/refresh] Missing storeId in request body', { body: req.body, scopeParam });
     return res.status(400).json({ error: 'storeId (merchant_id) é obrigatório' });
   }
+
+  const traceId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  console.log('[ifood-auth/refresh] ⇢ start', { traceId, storeId, scopeParam, scope });
 
   try {
     // 1. Encontrar a conta. Aceita:
@@ -98,6 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       authData = fallbackData || undefined as any;
     }
     if (!authData) {
+      console.warn('[ifood-auth/refresh] No auth data found', { traceId, internalAccountId, wantedScope });
       return res.status(404).json({ error: 'not_found', message: 'Refresh token não encontrado para a loja (verifique se o vínculo foi concluído)' });
     }
 
@@ -107,6 +112,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const remainingMs = expiresAt ? expiresAt.getTime() - Date.now() : 0;
       if (expiresAt && remainingMs > 120_000 && authData?.access_token) {
         const currentAccess = await decryptFromB64(authData.access_token);
+        console.log('[ifood-auth/refresh] Returning cached token', { traceId, internalAccountId, remainingMs, wantedScope });
         return res.status(200).json({
           access_token: currentAccess,
           refresh_token: await decryptFromB64(authData.refresh_token),
@@ -138,20 +144,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const url = buildIFoodUrl('/authentication/v1.0/oauth/token');
-    const response = await fetch(url, withIFoodProxy({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grantType: 'refresh_token',
-        clientId: clientId!,
-        clientSecret: clientSecret!,
-        refreshToken: refreshToken,
-      }),
-    }));
+    let response: Response;
+    try {
+      console.log('[ifood-auth/refresh] Calling iFood OAuth', {
+        traceId,
+        url,
+        scope,
+        wantedScope,
+        internalAccountId,
+      });
 
-    const tokenData: any = await response.json();
+      response = await fetch(url, withIFoodProxy({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grantType: 'refresh_token',
+          clientId: clientId!,
+          clientSecret: clientSecret!,
+          refreshToken: refreshToken,
+        }),
+      }));
+    } catch (fetchError: any) {
+      console.error('[ifood-auth/refresh] Fetch error calling OAuth', {
+        traceId,
+        error: fetchError?.message,
+        stack: fetchError?.stack,
+      });
+      throw new Error(`Failed to call iFood OAuth: ${fetchError?.message ?? 'unknown error'}`);
+    }
+
+    const tokenData: any = await response.json().catch((parseError: any) => {
+      console.error('[ifood-auth/refresh] Failed to parse OAuth response', {
+        traceId,
+        status: response.status,
+        error: parseError?.message,
+      });
+      throw new Error(`Failed to parse OAuth response (${response.status})`);
+    });
+
+    console.log('[ifood-auth/refresh] OAuth response received', {
+      traceId,
+      status: response.status,
+      keys: tokenData ? Object.keys(tokenData) : null,
+    });
 
     if (!response.ok) {
+      console.warn('[ifood-auth/refresh] OAuth request failed', {
+        traceId,
+        status: response.status,
+        tokenData,
+      });
       return res.status(response.status).json({ error: 'Falha ao renovar token com iFood', details: tokenData });
     }
 
@@ -166,6 +208,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('account_id', internalAccountId)
       .eq('scope', wantedScope);
 
+    console.log('[ifood-auth/refresh] Token refreshed successfully', {
+      traceId,
+      internalAccountId,
+      wantedScope,
+      expiresIn: tokenData.expiresIn,
+    });
+
     res.status(200).json({
       access_token: tokenData.accessToken,
       refresh_token: tokenData.refreshToken,
@@ -174,6 +223,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (e: any) {
     console.error('[ifood-auth/refresh] Error:', {
+      traceId,
       error: e.message,
       stack: e.stack,
       storeId,
@@ -185,5 +235,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       message: e.message,
       details: e.stack?.split('\n')[0] || e.toString()
     });
+  } finally {
+    console.log('[ifood-auth/refresh] ⇢ end', { traceId, storeId, scope });
   }
 }
