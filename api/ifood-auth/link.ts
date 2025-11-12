@@ -106,10 +106,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const url = buildIFoodUrl('/authentication/v1.0/oauth/userCode');
     let data: any;
     try {
+      const proxyHeaders = withIFoodProxy({ headers: { 'Accept-Encoding': 'identity' } }).headers as Headers;
       const response = await axios.post(url, requestBody, {
-        headers: Object.fromEntries(
-          (withIFoodProxy({ headers: {} }).headers as Headers).entries()
-        ),
+        headers: Object.fromEntries(proxyHeaders.entries()),
         responseType: 'json',
       });
       data = response.data;
