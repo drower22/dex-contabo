@@ -42,11 +42,17 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
       return;
     }
 
-    const { data: account } = await supabase
+    const { data: account, error: accountError } = await supabase
       .from('accounts')
       .select('id, ifood_merchant_id')
       .eq('id', accountId)
-      .single();
+      .maybeSingle();
+
+    if (accountError) {
+      console.error('[ifood-auth/link] Database error:', { traceId, accountError });
+      res.status(500).json({ error: 'Erro ao consultar conta no banco de dados' });
+      return;
+    }
 
     if (!account?.id) {
       console.warn('[ifood-auth/link] Account not found', { traceId, accountId });

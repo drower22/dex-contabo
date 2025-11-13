@@ -120,6 +120,12 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       }
     } catch {}
 
+    if (!authData.refresh_token) {
+      console.warn('[ifood-auth/refresh] Empty refresh token', { traceId, internalAccountId, wantedScope });
+      res.status(404).json({ error: 'not_found', message: 'Refresh token vazio. Refaça o vínculo.' });
+      return;
+    }
+
     const refreshToken = await decryptFromB64(authData.refresh_token);
 
     // Usar apenas variáveis específicas por scope (sem fallback genérico)

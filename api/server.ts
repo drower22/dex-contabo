@@ -65,13 +65,31 @@ function adaptVercelHandler(handler: (req: any, res: any) => Promise<void>) {
       
       const vercelRes: any = {
         status: (code: number) => {
-          res.status(code);
+          if (!res.headersSent) {
+            res.status(code);
+          }
           return vercelRes;
         },
-        json: (data: any) => res.json(data),
-        send: (data: any) => res.send(data),
-        end: () => res.end(),
-        setHeader: (key: string, value: string) => res.setHeader(key, value),
+        json: (data: any) => {
+          if (!res.headersSent) {
+            return res.json(data);
+          }
+        },
+        send: (data: any) => {
+          if (!res.headersSent) {
+            return res.send(data);
+          }
+        },
+        end: () => {
+          if (!res.headersSent) {
+            return res.end();
+          }
+        },
+        setHeader: (key: string, value: string) => {
+          if (!res.headersSent) {
+            return res.setHeader(key, value);
+          }
+        },
       };
       
       await handler(vercelReq, vercelRes);

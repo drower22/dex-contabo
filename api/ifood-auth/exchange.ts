@@ -51,8 +51,8 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
     hasVerifier: !!authorizationCodeVerifier
   });
 
-  if ((!bodyStoreId && !bodyMerchantId) || !authorizationCode || !authorizationCodeVerifier || !REDIRECT_URI) {
-    res.status(400).json({ error: 'Informe storeId (UUID interno) ou merchantId, além de authorizationCode, authorizationCodeVerifier e redirect_uri.' });
+  if ((!bodyStoreId && !bodyMerchantId) || !authorizationCode || !authorizationCodeVerifier) {
+    res.status(400).json({ error: 'Informe storeId (UUID interno) ou merchantId, além de authorizationCode e authorizationCodeVerifier.' });
     return;
   }
 
@@ -175,11 +175,27 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       merchantIdFromResponse: tokenData.merchantId || tokenData.merchantID || tokenData.merchant_id || null
     });
 
+    // Buscar merchantId salvo no link primeiro (preserva valor do modal)
+    let storedMerchantId: string | null = null;
+    try {
+      const { data: authRecord } = await supabase
+        .from('ifood_store_auth')
+        .select('ifood_merchant_id')
+        .eq('account_id', resolvedAccountId)
+        .eq('scope', scope || 'reviews')
+        .maybeSingle();
+      storedMerchantId = authRecord?.ifood_merchant_id || null;
+      console.log('[ifood-auth/exchange] 🏪 Stored merchantId from link:', storedMerchantId);
+    } catch (e: any) {
+      console.warn('[ifood-auth/exchange] ⚠️ Failed to fetch stored merchantId:', e.message);
+    }
+
     // Try to resolve merchantId from token response or fallback to /merchants/me
     let merchantId: string | undefined = tokenData.merchantId
       || tokenData.merchantID
       || tokenData.merchant_id
-      || tokenData?.merchant?.id;
+      || tokenData?.merchant?.id
+      || storedMerchantId;
 
     if (!merchantId) {
       console.log('[ifood-auth/exchange] 🔍 Fetching merchantId from /merchants/me...');
@@ -267,13 +283,13 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
     console.log('[ifood-auth/exchange] ✅ Upsert successful:', savedData);
 
     // Após salvar os tokens, atualiza a tabela 'accounts' com o merchantId correto
-    const finalMerchantId = merchantId || existingMerchantId;
+    const finalMerchantId = merchantId || storedMerchantId || existingMerchantId;
     if (finalMerchantId) {
       console.log('[ifood-auth/exchange] 📝 Updating accounts table with merchantId:', finalMerchantId);
       const { error: updateError } = await supabase
         .from('accounts')
         .update({
-          ifood_merchant_id: merchantId,
+          ifood_merchant_id: finalMerchantId,
         })
         .eq('id', resolvedAccountId);
 
@@ -290,6 +306,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       access_token: tokenData.accessToken,
       refresh_token: tokenData.refreshToken,
       expires_in: tokenData.expiresIn,
+      merchant_id: finalMerchantId,
     });
     return;
 

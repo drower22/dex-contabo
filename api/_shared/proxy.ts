@@ -22,9 +22,11 @@ export function proxifyIFoodUrl(url: string): string {
   try {
     const parsed = new URL(url);
     const normalized = normalizePath(`${parsed.pathname}${parsed.search}`);
-    return buildIFoodUrl(normalized);
+    const proxyUrl = new URL(base);
+    proxyUrl.searchParams.set('path', normalized);
+    return proxyUrl.toString();
   } catch {
-    return buildIFoodUrl(url);
+    return url;
   }
 }
 
