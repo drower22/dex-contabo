@@ -35,16 +35,19 @@ const statusHandler = async (req: VercelRequest, res: VercelResponse): Promise<v
 
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method Not Allowed' });
+    return;
   }
 
   const { accountId, scope } = req.query;
 
   if (!accountId || typeof accountId !== 'string') {
     res.status(400).json({ error: 'Missing or invalid accountId parameter' });
+    return;
   }
 
   if (!scope || (scope !== 'reviews' && scope !== 'financial')) {
     res.status(400).json({ error: 'Missing or invalid scope parameter. Must be "reviews" or "financial"' });
+    return;
   }
 
   try {
@@ -63,6 +66,7 @@ const statusHandler = async (req: VercelRequest, res: VercelResponse): Promise<v
         message: 'Database query failed',
         error: error.message 
       });
+      return;
     }
 
     // Se não há registro, status é 'pending' (apenas resposta; não persiste)
@@ -71,6 +75,7 @@ const statusHandler = async (req: VercelRequest, res: VercelResponse): Promise<v
         status: 'pending',
         message: 'No authentication record found for this account and scope'
       });
+      return;
     }
 
     // 2. Descriptografa o access_token
@@ -83,6 +88,7 @@ const statusHandler = async (req: VercelRequest, res: VercelResponse): Promise<v
         status: 'pending',
         message: 'Token encrypted with legacy scheme or invalid. Please re-link.'
       });
+      return;
     }
 
     // 3. Valida o token na API REAL do iFood (GET /merchants/me)
@@ -113,6 +119,7 @@ const statusHandler = async (req: VercelRequest, res: VercelResponse): Promise<v
           message: 'Token validated successfully with iFood API',
           merchantId: merchantData?.id || data.ifood_merchant_id
         });
+        return;
       }
 
       // Token inválido ou expirado: apenas responde, não altera o status salvo
@@ -122,6 +129,7 @@ const statusHandler = async (req: VercelRequest, res: VercelResponse): Promise<v
           message: 'Token expired or revoked. Please reconnect.',
           httpStatus: ifoodResponse.status
         });
+        return;
       }
 
       // Outros erros da API iFood: apenas responde, não altera o status salvo
@@ -131,6 +139,7 @@ const statusHandler = async (req: VercelRequest, res: VercelResponse): Promise<v
         message: `iFood API returned ${ifoodResponse.status}`,
         httpStatus: ifoodResponse.status
       });
+      return;
 
     } catch (ifoodError: any) {
       // Erro de rede ou timeout ao chamar API iFood
@@ -140,6 +149,7 @@ const statusHandler = async (req: VercelRequest, res: VercelResponse): Promise<v
         message: 'Failed to validate token with iFood API',
         error: ifoodError.message
       });
+      return;
     }
 
   } catch (e: any) {
@@ -149,6 +159,7 @@ const statusHandler = async (req: VercelRequest, res: VercelResponse): Promise<v
       message: 'Internal server error',
       error: e.message 
     });
+    return;
   }
 }
 

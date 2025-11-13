@@ -35,6 +35,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
 
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method Not Allowed' });
+    return;
   }
 
   const scopeParam = (req.query.scope as string) || req.body?.scope;
@@ -51,6 +52,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
 
   if ((!bodyStoreId && !bodyMerchantId) || !authorizationCode || !authorizationCodeVerifier) {
     res.status(400).json({ error: 'Informe storeId (UUID interno) ou merchantId, além de authorizationCode e authorizationCodeVerifier.' });
+    return;
   }
 
   try {
@@ -107,6 +109,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
         error: 'Missing client credentials',
         message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} or SECRET not configured`
       });
+      return;
     }
 
     console.log('[ifood-auth/exchange] 🔑 Using credentials:', {
@@ -127,7 +130,10 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
     let tokenData: any;
     try {
       const response = await axios.post(url, requestBody, {
-        headers: { 'Accept-Encoding': 'identity' },
+        headers: {
+          'Accept-Encoding': 'identity',
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
         responseType: 'json',
       });
       tokenData = response.data;
@@ -142,6 +148,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
           error: 'Falha ao trocar código por token',
           details: error.response?.data 
         });
+        return;
       } else {
         console.error('[ifood-auth/exchange] ❌ Generic error calling iFood API', {
           error: error?.message,
@@ -278,6 +285,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       refresh_token: tokenData.refreshToken,
       expires_in: tokenData.expiresIn,
     });
+    return;
 
   } catch (e: any) {
     console.error('[ifood-auth/exchange] 💥 Fatal error:', {
@@ -285,6 +293,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       stack: e.stack
     });
     res.status(500).json({ error: 'Erro interno no servidor', message: e.message });
+    return;
   }
 }
 
