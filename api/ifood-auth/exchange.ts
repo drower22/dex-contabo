@@ -51,6 +51,17 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
     hasVerifier: !!authorizationCodeVerifier
   });
 
+  // 🔍 Log completo dos dados recebidos
+  console.log('[ifood-auth/exchange] 📥 Raw request data:', {
+    method: req.method,
+    query: req.query,
+    body: req.body,
+    headers: {
+      'content-type': req.headers['content-type'],
+      'user-agent': req.headers['user-agent']
+    }
+  });
+
   if ((!bodyStoreId && !bodyMerchantId) || !authorizationCode || !authorizationCodeVerifier) {
     res.status(400).json({ error: 'Informe storeId (UUID interno) ou merchantId, além de authorizationCode e authorizationCodeVerifier.' });
     return;
@@ -118,6 +129,16 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       scope
     });
 
+    // 🔍 Log das variáveis antes de montar o request
+    console.log('[ifood-auth/exchange] 📋 Variables before request:', {
+      authorizationCode: authorizationCode?.substring(0, 10) + '...',
+      authorizationCodeVerifier: authorizationCodeVerifier?.substring(0, 10) + '...',
+      clientId: clientId?.substring(0, 8) + '...',
+      scope,
+      REDIRECT_URI,
+      IFOOD_BASE_URL: IFOOD_BASE_URL
+    });
+
     const url = buildIFoodUrl('/authentication/v1.0/oauth/token');
     const requestBody = new URLSearchParams({
       grant_type: 'authorization_code_pkce',
@@ -126,6 +147,25 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       code_verifier: authorizationCodeVerifier,
       redirect_uri: REDIRECT_URI,
       scope,
+    });
+
+    // 🔍 Log detalhado do request
+    console.log('[ifood-auth/exchange] 📤 Request details:', {
+      url,
+      method: 'POST',
+      headers: {
+        'Accept-Encoding': 'identity',
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      bodyParams: {
+        grant_type: 'authorization_code_pkce',
+        client_id: clientId!.substring(0, 8) + '...',
+        code: authorizationCode?.substring(0, 8) + '...',
+        code_verifier: authorizationCodeVerifier?.substring(0, 8) + '...',
+        redirect_uri: REDIRECT_URI,
+        scope,
+      },
+      bodyString: requestBody.toString()
     });
 
     let tokenData: any;
@@ -144,6 +184,8 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
           status: error.response?.status,
           data: error.response?.data,
           message: error.message,
+          requestUrl: url,
+          requestBodyString: requestBody.toString(),
         });
         res.status(error.response?.status || 500).json({ 
           error: 'Falha ao trocar código por token',
