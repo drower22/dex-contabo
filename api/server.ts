@@ -77,10 +77,12 @@ function adaptVercelHandler(handler: (req: any, res: any) => Promise<void>) {
       await handler(vercelReq, vercelRes);
     } catch (error: any) {
       console.error('Handler error:', error);
-      res.status(500).json({ 
-        error: 'Internal server error', 
-        message: error.message 
-      });
+      if (!res.headersSent) {
+        res.status(500).json({ 
+          error: 'Internal server error', 
+          message: error.message 
+        });
+      }
     }
   };
 }

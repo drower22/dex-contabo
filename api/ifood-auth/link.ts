@@ -26,6 +26,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
   if (req.method !== 'POST') {
     console.log('[LINK] ❌ Method not allowed:', req.method);
     res.status(405).json({ error: 'Method Not Allowed' });
+    return;
   }
 
   const scopeParam = (req.query.scope as string) || req.body?.scope;
@@ -38,6 +39,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
     if (!accountId) {
       console.warn('[ifood-auth/link] Missing accountId', { traceId, body: req.body });
       res.status(400).json({ error: 'accountId (ID interno) é obrigatório' });
+      return;
     }
 
     const { data: account } = await supabase
@@ -49,6 +51,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
     if (!account?.id) {
       console.warn('[ifood-auth/link] Account not found', { traceId, accountId });
       res.status(404).json({ error: 'Conta não encontrada para o accountId informado' });
+      return;
     }
 
     // Garante que o merchantId seja salvo no primeiro vínculo
@@ -83,6 +86,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
         error: 'Missing client credentials',
         message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} not configured`
       });
+      return;
     }
 
     const requestBody = new URLSearchParams({
@@ -129,6 +133,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
           error: 'Falha ao solicitar código de autorização do iFood',
           details: parsedBody || rawBody,
         });
+        return;
       }
 
       data = parsedBody;
@@ -145,6 +150,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
           error: 'Falha ao solicitar código de autorização do iFood',
           details: error.response?.data 
         });
+        return;
       } else {
         console.error('[ifood-auth/link] ❌ Generic error calling iFood API', {
           traceId,
@@ -170,6 +176,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
       ...data,
       account_id: account.id,
     });
+    return;
   } catch (error: any) {
     console.error('[ifood-auth/link] error', {
       traceId,
@@ -182,6 +189,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
       message: error?.message,
       details: error?.stack?.split('\n')[0] || 'Unknown error',
     });
+    return;
   } finally {
     console.log('[ifood-auth/link] ⇢ end', { traceId, accountId, merchantId, scope });
   }
