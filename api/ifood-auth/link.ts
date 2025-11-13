@@ -45,76 +45,37 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
   const scope = scopeParam === 'financial' ? 'financial' : (scopeParam === 'reviews' ? 'reviews' : undefined);
   const { accountId, merchantId } = req.body;
   const traceId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  console.log('[ifood-auth/link] ⇢ start', { traceId, accountId, merchantId, scopeParam, scope });
+  console.log('[ifood-auth/link] ⇢ start', { 
+    traceId,
+    accountId,
+    merchantId,
+    scopeParam,
+    scope
+  });
+
+  // ✅ Fluxo correto: só precisa do accountId (UUID interno)
+  if (!accountId) {
+    console.log('[ifood-auth/link] ❌ Missing accountId');
+    res.status(400).json({ error: 'accountId (UUID interno) é obrigatório' });
+    return;
+  }
+
+  if (!scope) {
+    console.log('[ifood-auth/link] ❌ Invalid scope');
+    res.status(400).json({ error: 'Scope inválido. Use ?scope=financial ou ?scope=reviews' });
+    return;
+  }
 
   try {
-    // Validar se temos pelo menos um identificador
-    if (!accountId && !merchantId) {
-      console.warn('[ifood-auth/link] Missing identifiers', { traceId, body: req.body });
-      res.status(400).json({ error: 'accountId (ID interno) ou merchantId é obrigatório' });
+    // ✅ Não consulta banco - apenas valida se é UUID válido
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(accountId)) {
+      console.log('[ifood-auth/link] ❌ Invalid accountId format');
+      res.status(400).json({ error: 'accountId deve ser um UUID válido' });
       return;
     }
 
-    // Se accountId parece ser merchantId (não é UUID), trocar
-    let finalAccountId = accountId;
-    let finalMerchantId = merchantId;
-    
-    if (accountId && !merchantId && accountId.length > 36) {
-      console.log('[ifood-auth/link] 🔄 accountId parece ser merchantId, ajustando...', { accountId });
-      finalMerchantId = accountId;
-      finalAccountId = undefined;
-    }
-
-    let account: any = null;
-    let accountError: any = null;
-
-    // Tentar buscar por accountId primeiro
-    if (finalAccountId) {
-      const result = await supabase
-        .from('accounts')
-        .select('id, ifood_merchant_id')
-        .eq('id', finalAccountId)
-        .maybeSingle();
-      account = result.data;
-      accountError = result.error;
-    }
-
-    // Se não encontrou e temos merchantId, buscar por merchant
-    if (!account && finalMerchantId) {
-      console.log('[ifood-auth/link] 🔍 Buscando conta por merchantId...', { finalMerchantId });
-      const result = await supabase
-        .from('accounts')
-        .select('id, ifood_merchant_id')
-        .eq('ifood_merchant_id', finalMerchantId)
-        .maybeSingle();
-      account = result.data;
-      if (!result.error) accountError = null;
-    }
-
-    if (accountError) {
-      console.error('[ifood-auth/link] Database error:', { traceId, accountError });
-      res.status(500).json({ error: 'Erro ao consultar conta no banco de dados' });
-      return;
-    }
-
-    if (!account?.id) {
-      console.warn('[ifood-auth/link] Account not found', { traceId, accountId });
-      res.status(404).json({ error: 'Conta não encontrada para o accountId informado' });
-      return;
-    }
-
-    // Garante que o merchantId seja salvo no primeiro vínculo
-    const merchantToSave = finalMerchantId || merchantId;
-    if (merchantToSave) {
-      const { error: upsertError } = await supabase
-        .from('ifood_store_auth')
-        .upsert({ account_id: account.id, ifood_merchant_id: merchantToSave, scope: scope || 'reviews' }, { onConflict: 'account_id,scope' });
-
-      if (upsertError) {
-        console.error('[ifood-auth/link] Error saving merchantId', { traceId, upsertError });
-        // Não bloqueia o fluxo, mas loga o erro
-      }
-    }
+    console.log('[ifood-auth/link] ✅ AccountId válido, gerando userCode...', { accountId, scope });
 
     // Usar apenas variáveis específicas por scope (sem fallback genérico)
     const clientId = scope === 'financial'
@@ -210,21 +171,28 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
       }
     }
 
-    await supabase
+    // ✅ Salvar apenas link_code e verifier (sem merchantId ainda)
+    const { error: saveError } = await supabase
       .from('ifood_store_auth')
       .upsert({
-        account_id: account.id,
-        scope: scope || 'reviews',
+        account_id: accountId,
+        scope: scope,
         link_code: data.userCode,
         verifier: data.authorizationCodeVerifier,
         status: 'pending',
       }, { onConflict: 'account_id,scope' });
 
-    console.log('[ifood-auth/link] Link stored successfully', { traceId, accountId: account.id, scope });
+    if (saveError) {
+      console.error('[ifood-auth/link] ❌ Error saving to database', { traceId, saveError });
+      res.status(500).json({ error: 'Falha ao salvar no banco de dados', details: saveError.message });
+      return;
+    }
+
+    console.log('[ifood-auth/link] ✅ Link stored successfully', { traceId, accountId, scope });
 
     res.status(200).json({
       ...data,
-      account_id: account.id,
+      account_id: accountId,
     });
     return;
   } catch (error: any) {
@@ -241,7 +209,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
     });
     return;
   } finally {
-    console.log('[ifood-auth/link] ⇢ end', { traceId, accountId, merchantId, scope });
+    console.log('[ifood-auth/link] ⇢ end', { traceId, accountId, scope });
   }
 }
 
