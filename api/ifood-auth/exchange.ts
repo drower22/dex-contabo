@@ -30,7 +30,7 @@ const supabase = createClient(
 );
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
-const REDIRECT_URI = process.env.IFOOD_REDIRECT_URI;
+const REDIRECT_URI = process.env.IFOOD_REDIRECT_URI || 'https://portal.ifood.com.br/';
 
 const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise<void> => {
 
@@ -110,11 +110,6 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
 
     if (!scope) {
       res.status(400).json({ error: 'Scope inválido ou ausente. Utilize ?scope=financial|reviews.' });
-      return;
-    }
-
-    if (!REDIRECT_URI) {
-      res.status(500).json({ error: 'IFOOD_REDIRECT_URI não configurado no ambiente.' });
       return;
     }
 
