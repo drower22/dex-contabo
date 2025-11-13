@@ -10,10 +10,22 @@ import axios from 'axios';
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// 🔍 Validação das variáveis de ambiente
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+console.log('[ifood-auth/link] 🔧 Environment check:', {
+  hasSupabaseUrl: !!SUPABASE_URL,
+  hasSupabaseKey: !!SUPABASE_SERVICE_ROLE_KEY,
+  supabaseUrlLength: SUPABASE_URL?.length || 0,
+  supabaseKeyLength: SUPABASE_SERVICE_ROLE_KEY?.length || 0
+});
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error(`Missing Supabase credentials: URL=${!!SUPABASE_URL}, KEY=${!!SUPABASE_SERVICE_ROLE_KEY}`);
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<void> => {
   console.log('\n========== [LINK] INÍCIO DA REQUISIÇÃO ==========');
