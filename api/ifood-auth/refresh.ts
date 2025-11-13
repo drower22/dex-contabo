@@ -37,6 +37,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
 
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method Not Allowed' });
+    return;
   }
 
   const scopeParam = (req.query.scope as string) || req.body?.scope;
@@ -45,6 +46,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
   if (!storeId) {
     console.warn('[ifood-auth/refresh] Missing storeId in request body', { body: req.body, scopeParam });
     res.status(400).json({ error: 'storeId (merchant_id) é obrigatório' });
+    return;
   }
 
   const traceId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -74,6 +76,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
     }
     if (!internalAccountId) {
       res.status(404).json({ error: 'storeId não mapeia para nenhuma conta (merchant_id ou accounts.id)' });
+      return;
     }
 
     // 2. Usar o ID interno para buscar o token de atualização
@@ -98,6 +101,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
     if (!authData) {
       console.warn('[ifood-auth/refresh] No auth data found', { traceId, internalAccountId, wantedScope });
       res.status(404).json({ error: 'not_found', message: 'Refresh token não encontrado para a loja (verifique se o vínculo foi concluído)' });
+      return;
     }
 
     // 2.a. Se o access_token atual ainda está válido por >120s, reutilize para evitar rate limit
@@ -112,6 +116,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
           refresh_token: await decryptFromB64(authData.refresh_token),
           expires_in: Math.floor(remainingMs / 1000),
         });
+        return;
       }
     } catch {}
 
@@ -124,18 +129,15 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
         ? process.env.IFOOD_CLIENT_ID_REVIEWS
         : undefined;
 
-    const clientSecret = scope === 'financial'
-      ? process.env.IFOOD_CLIENT_SECRET_FINANCIAL
-      : scope === 'reviews'
-        ? process.env.IFOOD_CLIENT_SECRET_REVIEWS
-        : undefined;
-
-    if (!clientId || !clientSecret) {
+    if (!clientId) {
       res.status(400).json({ 
         error: 'Missing client credentials',
-        message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} or SECRET not configured`
+        message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} not configured`
       });
+      return;
     }
+
+    const targetScope = scope || wantedScope;
 
     let tokenData: any;
     try {
@@ -152,8 +154,8 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       const requestBody = new URLSearchParams({
         grant_type: 'refresh_token',
         client_id: clientId!,
-        client_secret: clientSecret!,
         refresh_token: refreshToken,
+        scope: targetScope,
       });
 
       const { data } = await axios.post(proxyUrl.toString(), requestBody, {
@@ -180,6 +182,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
           error: 'Falha ao renovar token com iFood', 
           details: error.response?.data 
         });
+        return;
       } else {
         console.error('[ifood-auth/refresh] Generic error calling OAuth', {
           traceId,
@@ -213,6 +216,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       refresh_token: tokenData.refreshToken,
       expires_in: tokenData.expiresIn,
     });
+    return;
 
   } catch (e: any) {
     console.error('[ifood-auth/refresh] Error:', {
@@ -228,6 +232,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       message: e.message,
       details: e.stack?.split('\n')[0] || e.toString()
     });
+    return;
   } finally {
     console.log('[ifood-auth/refresh] ⇢ end', { traceId, storeId, scope });
   }

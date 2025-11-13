@@ -30,6 +30,7 @@ const supabase = createClient(
 );
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
+const REDIRECT_URI = process.env.IFOOD_REDIRECT_URI;
 
 const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise<void> => {
 
@@ -50,8 +51,8 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
     hasVerifier: !!authorizationCodeVerifier
   });
 
-  if ((!bodyStoreId && !bodyMerchantId) || !authorizationCode || !authorizationCodeVerifier) {
-    res.status(400).json({ error: 'Informe storeId (UUID interno) ou merchantId, além de authorizationCode e authorizationCodeVerifier.' });
+  if ((!bodyStoreId && !bodyMerchantId) || !authorizationCode || !authorizationCodeVerifier || !REDIRECT_URI) {
+    res.status(400).json({ error: 'Informe storeId (UUID interno) ou merchantId, além de authorizationCode, authorizationCodeVerifier e redirect_uri.' });
     return;
   }
 
@@ -87,6 +88,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
     if (!resolvedAccountId) {
       console.error('[ifood-auth/exchange] ❌ Account not found');
       res.status(404).json({ error: 'Conta não encontrada para o storeId/merchantId informado.' });
+      return;
     }
 
     console.log('[ifood-auth/exchange] ✅ Account resolved:', { resolvedAccountId, existingMerchantId });
@@ -98,33 +100,37 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
         ? process.env.IFOOD_CLIENT_ID_REVIEWS
         : undefined;
 
-    const clientSecret = scope === 'financial'
-      ? process.env.IFOOD_CLIENT_SECRET_FINANCIAL
-      : scope === 'reviews'
-        ? process.env.IFOOD_CLIENT_SECRET_REVIEWS
-        : undefined;
-
-    if (!clientId || !clientSecret) {
+    if (!clientId) {
       res.status(400).json({ 
         error: 'Missing client credentials',
-        message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} or SECRET not configured`
+        message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} not configured`
       });
+      return;
+    }
+
+    if (!scope) {
+      res.status(400).json({ error: 'Scope inválido ou ausente. Utilize ?scope=financial|reviews.' });
+      return;
+    }
+
+    if (!REDIRECT_URI) {
+      res.status(500).json({ error: 'IFOOD_REDIRECT_URI não configurado no ambiente.' });
       return;
     }
 
     console.log('[ifood-auth/exchange] 🔑 Using credentials:', {
       hasClientId: !!clientId,
-      hasClientSecret: !!clientSecret,
       scope
     });
 
     const url = buildIFoodUrl('/authentication/v1.0/oauth/token');
     const requestBody = new URLSearchParams({
-      grant_type: 'authorization_code',
+      grant_type: 'authorization_code_pkce',
       client_id: clientId!,
-      client_secret: clientSecret!,
-      authorization_code: authorizationCode,
-      authorization_code_verifier: authorizationCodeVerifier,
+      code: authorizationCode,
+      code_verifier: authorizationCodeVerifier,
+      redirect_uri: REDIRECT_URI,
+      scope,
     });
 
     let tokenData: any;
