@@ -11,15 +11,20 @@ API de autenticação distribuída do iFood seguindo o padrão OAuth 2.0.
 ## 🎯 Endpoints
 
 ### 1. POST `/api/ifood-auth/link`
-Solicita código de vínculo (userCode) para iniciar o fluxo OAuth.
+Solicita código de vínculo (`userCode`) para iniciar o fluxo OAuth distribuído.
 
-**Request:**
+**Request (nosso backend):**
 ```json
 {
-  "scope": "reviews",
-  "storeId": "uuid-da-conta"
+  "scope": "reviews" | "financial",
+  "accountId": "<UUID da tabela accounts.id>",
+  "merchantId": "<opcional: merchantId iFood>"
 }
 ```
+
+> **Importante:**
+> - Diferente dos exemplos genéricos da doc oficial, aqui o identificador principal é o `accountId` (UUID interno da tabela `accounts`).
+> - O `merchantId` ainda não é obrigatório nesta etapa; ele será resolvido/atualizado após o `exchange`.
 
 **Response:**
 ```json
@@ -31,23 +36,32 @@ Solicita código de vínculo (userCode) para iniciar o fluxo OAuth.
 }
 ```
 
-**Processo:**
-1. Chama API iFood para obter userCode
-2. Salva link_code e verifier no Supabase
-3. Retorna dados para o usuário autorizar no Portal
+**Processo (implementação atual):**
+1. Valida `accountId` como UUID e `scope` (`reviews`/`financial`).
+2. Seleciona o `clientId` correto por escopo:
+   - `IFOOD_CLIENT_ID_REVIEWS` para `reviews`.
+   - `IFOOD_CLIENT_ID_FINANCIAL` para `financial`.
+3. Chama a API iFood `/authentication/v1.0/oauth/userCode` **sempre com o parâmetro `clientId` (camelCase)** no corpo `x-www-form-urlencoded`.
+4. A chamada é feita preferencialmente através do **proxydex** (quando configurado):
+   - `IFOOD_PROXY_BASE?path=/authentication/v1.0/oauth/userCode` + header `X-Shared-Key: IFOOD_PROXY_KEY`.
+   - Se o proxydex não estiver configurado, cai na URL direta do iFood.
+5. Salva `link_code` (`userCode`) e `verifier` (`authorizationCodeVerifier`) em `ifood_store_auth` com `status = 'pending'` (
+   `account_id = accountId`, `scope`).
+6. Retorna os dados para o frontend exibir o `userCode` e a `verificationUrl` para o lojista.
 
 ---
 
 ### 2. POST `/api/ifood-auth/exchange`
-Troca authorizationCode por access_token e refresh_token.
+Troca o `authorizationCode` (fornecido pelo lojista no Portal) por `access_token` e `refresh_token`.
 
-**Request:**
+**Request (nosso backend):**
 ```json
 {
-  "scope": "reviews",
-  "storeId": "uuid-da-conta",
-  "authorizationCode": "codigo-do-portal",
-  "authorizationCodeVerifier": "verifier_xyz..."
+  "scope": "reviews" | "financial",
+  "storeId": "<UUID accounts.id OU merchantId>",
+  "merchantId": "<opcional: merchantId iFood>",
+  "authorizationCode": "<código recebido no Portal>",
+  "authorizationCodeVerifier": "<verifier salvo na etapa /link>"
 }
 ```
 
@@ -60,24 +74,33 @@ Troca authorizationCode por access_token e refresh_token.
 }
 ```
 
-**Processo:**
-1. Resolve account_id interno
-2. Chama API iFood com grantType=authorization_code
-3. Extrai merchantId (3 métodos de fallback)
-4. Criptografa tokens com AES-GCM
-5. Salva no Supabase com status 'connected'
-6. Atualiza accounts.ifood_merchant_id
+**Processo (implementação atual):**
+1. Resolve o `account_id` interno a partir de `storeId` e/ou `merchantId`:
+   - Tenta `accounts.id = storeId`.
+   - Se não encontrar, tenta `accounts.ifood_merchant_id = merchantId` ou `storeId`.
+2. Seleciona o `clientId` correto por escopo (`IFOOD_CLIENT_ID_REVIEWS` / `IFOOD_CLIENT_ID_FINANCIAL`).
+3. Chama a API iFood `/authentication/v1.0/oauth/token` com grant equivalente a **authorization code + PKCE** usando corpo `x-www-form-urlencoded`:
+   - `grantType` (doc oficial) → enviamos `grant_type = 'authorization_code_pkce'`.
+   - `clientId` → usamos **sempre `clientId` (camelCase)** no corpo.
+   - `authorizationCode` → enviamos como `code`.
+   - `authorizationCodeVerifier` → enviamos como `code_verifier`.
+   - `redirect_uri` e `scope` são incluídos conforme configurado.
+   - A chamada é feita preferencialmente via proxydex: `IFOOD_PROXY_BASE?path=/authentication/v1.0/oauth/token` + `X-Shared-Key`.
+4. Normaliza a resposta do iFood, aceitando tanto `accessToken`/`refreshToken` quanto `access_token`/`refresh_token`.
+5. Resolve o `merchantId` usando múltiplos fallbacks: campo direto da resposta, endpoint `/merchant/v1.0/merchants/me` e claims JWT.
+6. Criptografa `accessToken` e `refreshToken` com AES-GCM (`encryptToB64`) e faz `upsert` em `ifood_store_auth` com `status = 'connected'`.
+7. Atualiza `accounts.ifood_merchant_id` com o `merchantId` final.
 
 ---
 
 ### 3. POST `/api/ifood-auth/refresh`
-Renova access_token usando refresh_token.
+Renova o `access_token` usando o `refresh_token` previamente salvo.
 
-**Request:**
+**Request (nosso backend):**
 ```json
 {
-  "scope": "reviews",
-  "storeId": "merchant-id-ou-uuid"
+  "scope": "reviews" | "financial",
+  "storeId": "<ifood_merchant_id OU accounts.id>"
 }
 ```
 
@@ -90,22 +113,27 @@ Renova access_token usando refresh_token.
 }
 ```
 
-**Processo:**
-1. Busca conta e tokens no Supabase
-2. **Otimização:** Se token válido por >120s, retorna sem chamar API
-3. Descriptografa refresh_token
-4. Chama API iFood com grantType=refresh_token
-5. Criptografa novos tokens
-6. Atualiza no Supabase
+**Processo (implementação atual):**
+1. Resolve o `account_id` interno a partir de `storeId`:
+   - Primeiro tenta `accounts.ifood_merchant_id = storeId`.
+   - Fallback: `accounts.id = storeId`.
+2. Busca em `ifood_store_auth` o registro para esse `account_id` e `scope` (com fallback para o escopo oposto se não encontrar).
+3. Se o `access_token` atual ainda for válido por mais de 120s, descriptografa e retorna **sem** chamar a API iFood (otimização anti rate-limit).
+4. Caso precise renovar, descriptografa o `refresh_token` (`decryptFromB64`).
+5. Seleciona o `clientId` correto por escopo e chama `/authentication/v1.0/oauth/token` via proxydex com corpo `x-www-form-urlencoded`:
+   - Doc oficial: `grantType = refresh_token`, `clientId`, `clientSecret`, `refreshToken`.
+   - Implementação atual: enviamos `grant_type = 'refresh_token'`, `clientId` (camelCase) e `refresh_token` (snake_case) + `scope`.
+6. Criptografa os novos tokens (`encryptToB64`) e atualiza `ifood_store_auth` (tokens + `expires_at`, `status = 'connected'`).
+7. Retorna `access_token`, `refresh_token` e `expires_in` em camelCase para o frontend.
 
 ---
 
 ### 4. GET `/api/ifood-auth/status`
-Valida status da autenticação chamando API real do iFood.
+Valida o status da autenticação chamando a API real do iFood.
 
-**Request:**
-```
-GET /api/ifood-auth/status?accountId=uuid&scope=reviews
+**Request (nosso backend):**
+```http
+GET /api/ifood-auth/status?accountId=<UUID accounts.id>&scope=reviews|financial
 ```
 
 **Response:**
@@ -122,11 +150,13 @@ GET /api/ifood-auth/status?accountId=uuid&scope=reviews
 - `pending`: Não autenticado ou token expirado
 - `error`: Erro de validação
 
-**Processo:**
-1. Busca access_token no Supabase
-2. Descriptografa token
-3. Chama GET /merchant/v1.0/merchants/me
-4. Atualiza status baseado na resposta
+**Processo (implementação atual):**
+1. Busca `access_token` criptografado em `ifood_store_auth` por `account_id` + `scope`.
+2. Descriptografa o token (`decryptFromB64`).
+3. Chama diretamente `GET /merchant/v1.0/merchants/me` na API iFood com `Authorization: Bearer <access_token>`.
+4. Se a resposta for 200, considera o vínculo **conectado** e atualiza `ifood_store_auth.status = 'connected'` e `ifood_merchant_id` (quando disponível).
+5. Se a resposta for 401/403, considera o status **pending** (token expirado/revogado, mas sem alterar o registro salvo).
+6. Outros erros retornam `status = 'error'` com detalhes.
 
 ---
 

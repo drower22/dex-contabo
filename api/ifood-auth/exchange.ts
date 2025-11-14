@@ -151,10 +151,17 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       IFOOD_BASE_URL: IFOOD_BASE_URL
     });
 
-    const url = buildIFoodUrl('/authentication/v1.0/oauth/token');
+    const directUrl = buildIFoodUrl('/authentication/v1.0/oauth/token');
+    const proxyBase = process.env.IFOOD_PROXY_BASE?.trim();
+    const proxyKey = process.env.IFOOD_PROXY_KEY?.trim();
+
+    const url = proxyBase
+      ? `${proxyBase}?path=${encodeURIComponent('/authentication/v1.0/oauth/token')}`
+      : directUrl;
+
     const requestBody = new URLSearchParams({
       grant_type: 'authorization_code_pkce',
-      client_id: clientId!,
+      clientId: clientId!,
       code: authorizationCode,
       code_verifier: authorizationCodeVerifier,
       redirect_uri: REDIRECT_URI,
@@ -167,11 +174,12 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       method: 'POST',
       headers: {
         'Accept-Encoding': 'identity',
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...(proxyBase && proxyKey ? { 'X-Shared-Key': '[MASKED]' } : {}),
       },
       bodyParams: {
         grant_type: 'authorization_code_pkce',
-        client_id: clientId!.substring(0, 8) + '...',
+        clientId: clientId!.substring(0, 8) + '...',
         code: authorizationCode?.substring(0, 8) + '...',
         code_verifier: authorizationCodeVerifier?.substring(0, 8) + '...',
         redirect_uri: REDIRECT_URI,
@@ -182,11 +190,17 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
 
     let tokenData: any;
     try {
+      const headers: any = {
+        'Accept-Encoding': 'identity',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      };
+
+      if (proxyBase && proxyKey) {
+        headers['X-Shared-Key'] = proxyKey;
+      }
+
       const response = await axios.post(url, requestBody, {
-        headers: {
-          'Accept-Encoding': 'identity',
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
+        headers,
         responseType: 'json',
       });
       tokenData = response.data;

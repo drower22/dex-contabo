@@ -59,14 +59,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     errors.push(`Encryption: ${(error as Error).message}`);
   }
 
-  // 3. Check iFood Reviews credentials
+  // 3. Check iFood Reviews credentials (via proxydex se configurado)
   try {
     const clientId =
       process.env.IFOOD_CLIENT_ID_REVIEWS || process.env.IFOOD_CLIENT_ID;
+    const proxyBase = process.env.IFOOD_PROXY_BASE?.trim();
+    const proxyKey = process.env.IFOOD_PROXY_KEY?.trim();
+
     if (clientId) {
-      const resp = await fetch(`${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`, {
+      const directUrl = `${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`;
+      const url = proxyBase
+        ? `${proxyBase}?path=${encodeURIComponent('/authentication/v1.0/oauth/userCode')}`
+        : directUrl;
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      };
+      if (proxyBase && proxyKey) {
+        headers['X-Shared-Key'] = proxyKey;
+      }
+
+      const resp = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers,
         body: new URLSearchParams({ clientId }),
       });
       // 200 ou 400 = credenciais válidas (400 = request inválido mas auth ok)
@@ -81,13 +96,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     errors.push(`iFood Reviews: ${(error as Error).message}`);
   }
 
-  // 4. Check iFood Financial credentials
+  // 4. Check iFood Financial credentials (via proxydex se configurado)
   try {
     const clientId = process.env.IFOOD_CLIENT_ID_FINANCIAL;
+    const proxyBase = process.env.IFOOD_PROXY_BASE?.trim();
+    const proxyKey = process.env.IFOOD_PROXY_KEY?.trim();
+
     if (clientId) {
-      const resp = await fetch(`${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`, {
+      const directUrl = `${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`;
+      const url = proxyBase
+        ? `${proxyBase}?path=${encodeURIComponent('/authentication/v1.0/oauth/userCode')}`
+        : directUrl;
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      };
+      if (proxyBase && proxyKey) {
+        headers['X-Shared-Key'] = proxyKey;
+      }
+
+      const resp = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers,
         body: new URLSearchParams({ clientId }),
       });
       checks.ifood_financial = resp.ok || resp.status === 400;

@@ -166,20 +166,32 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
         internalAccountId,
       });
 
-      const proxyUrl = new URL(process.env.IFOOD_PROXY_BASE!)
-      proxyUrl.searchParams.set('path', '/authentication/v1.0/oauth/token')
+      const directUrl = `${IFOOD_BASE_URL}/authentication/v1.0/oauth/token`;
+      const proxyBase = process.env.IFOOD_PROXY_BASE?.trim();
+      const proxyKey = process.env.IFOOD_PROXY_KEY?.trim();
+
+      const url = proxyBase
+        ? `${proxyBase}?path=${encodeURIComponent('/authentication/v1.0/oauth/token')}`
+        : directUrl;
 
       const requestBody = new URLSearchParams({
         grant_type: 'refresh_token',
-        client_id: clientId!,
+        clientId: clientId!,
         refresh_token: refreshToken,
         scope: targetScope,
       });
 
-      const { data } = await axios.post(proxyUrl.toString(), requestBody, {
-        headers: {
-          'x-shared-key': process.env.IFOOD_PROXY_KEY!,
-        },
+      const headers: any = {
+        'Accept-Encoding': 'identity',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      };
+
+      if (proxyBase && proxyKey) {
+        headers['X-Shared-Key'] = proxyKey;
+      }
+
+      const { data } = await axios.post(url, requestBody, {
+        headers,
         responseType: 'json',
       });
       tokenData = data;
