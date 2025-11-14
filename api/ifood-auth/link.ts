@@ -116,7 +116,8 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
     const proxyBase = process.env.IFOOD_PROXY_BASE?.trim();
     const proxyKey = process.env.IFOOD_PROXY_KEY?.trim();
     
-    const url = proxyBase ? `${proxyBase}/authentication/v1.0/oauth/userCode` : directUrl;
+    // ✅ CORREÇÃO: Proxy Vercel espera ?path= como parâmetro
+    const url = proxyBase ? `${proxyBase}?path=${encodeURIComponent('/authentication/v1.0/oauth/userCode')}` : directUrl;
     
     console.log('[ifood-auth/link] 🌐 Request config:', {
       useProxy: !!proxyBase,
