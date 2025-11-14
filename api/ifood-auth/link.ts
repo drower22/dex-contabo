@@ -111,12 +111,33 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
       bodyParams: { clientId: `${clientId.substring(0, 8)}...` }
     });
 
-    const url = buildIFoodUrl('/authentication/v1.0/oauth/userCode');
+    // 🔧 Usar proxy se configurado, senão URL direta
+    const directUrl = buildIFoodUrl('/authentication/v1.0/oauth/userCode');
+    const proxyBase = process.env.IFOOD_PROXY_BASE?.trim();
+    const proxyKey = process.env.IFOOD_PROXY_KEY?.trim();
+    
+    const url = proxyBase ? `${proxyBase}/authentication/v1.0/oauth/userCode` : directUrl;
+    
+    console.log('[ifood-auth/link] 🌐 Request config:', {
+      useProxy: !!proxyBase,
+      url: url.substring(0, 50) + '...',
+      hasProxyKey: !!proxyKey
+    });
+
     let data: any;
     try {
-      const proxyHeaders = withIFoodProxy({ headers: { 'Accept-Encoding': 'identity' } }).headers as Headers;
+      const headers: any = {
+        'Accept-Encoding': 'identity',
+        'Content-Type': 'application/x-www-form-urlencoded'
+      };
+      
+      // Adicionar chave do proxy se usando proxy
+      if (proxyBase && proxyKey) {
+        headers['X-Shared-Key'] = proxyKey;
+      }
+
       const response = await axios.post<string>(url, requestBody, {
-        headers: Object.fromEntries(proxyHeaders.entries()),
+        headers,
         responseType: 'text',
         transformResponse: [(value) => value],
         validateStatus: () => true,
