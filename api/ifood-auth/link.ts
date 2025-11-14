@@ -104,10 +104,6 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
       clientId: clientId,  // ✅ CORRIGIDO: camelCase
     });
 
-    if (merchantId?.trim()) {
-      requestBody.append('merchantId', merchantId.trim());
-    }
-
     console.log('[ifood-auth/link] 📤 Sending request to iFood API:', {
       url: `${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`,
       method: 'POST',
