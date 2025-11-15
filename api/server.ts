@@ -123,6 +123,7 @@ function loadHandler(modulePath: string) {
 // Carregar handlers de autenticação
 const healthHandler = loadHandler('./ifood-auth/health');
 const linkHandler = loadHandler('./ifood-auth/link');
+const linkSaveHandler = loadHandler('./ifood-auth/link.save');
 const exchangeHandler = loadHandler('./ifood-auth/exchange');
 const refreshHandler = loadHandler('./ifood-auth/refresh');
 const statusHandler = loadHandler('./ifood-auth/status');
@@ -211,6 +212,15 @@ if (linkHandler) {
 } else {
   app.post('/api/ifood-auth/link', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Link handler not loaded' });
+  });
+}
+
+if (linkSaveHandler) {
+  app.post('/api/ifood-auth/link/save', adaptVercelHandler(linkSaveHandler));
+  console.log('✅ Link save handler loaded');
+} else {
+  app.post('/api/ifood-auth/link/save', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Link save handler not loaded' });
   });
 }
 
