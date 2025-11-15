@@ -123,10 +123,16 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
         ? process.env.IFOOD_CLIENT_ID_REVIEWS
         : undefined;
 
-    if (!clientId) {
+    const clientSecret = scope === 'financial'
+      ? process.env.IFOOD_CLIENT_SECRET_FINANCIAL
+      : scope === 'reviews'
+        ? process.env.IFOOD_CLIENT_SECRET_REVIEWS
+        : undefined;
+
+    if (!clientId || !clientSecret) {
       res.status(400).json({ 
         error: 'Missing client credentials',
-        message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} not configured`
+        message: `IFOOD_CLIENT_ID/SECRET_${scope?.toUpperCase()} not configured`
       });
       return;
     }
@@ -138,6 +144,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
 
     console.log('[ifood-auth/exchange] 🔑 Using credentials:', {
       hasClientId: !!clientId,
+      hasClientSecret: !!clientSecret,
       scope
     });
 
@@ -160,14 +167,13 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       : directUrl;
 
     const requestBody = new URLSearchParams({
-      // iFood OAuth espera parâmetros em camelCase, assim como no endpoint de userCode
-      // Se usarmos grant_type/code_verifier, o backend passa a enxergar grantType como null
-      grantType: 'authorization_code_pkce',
+      // Conforme documentação oficial do iFood para /oauth/token (fluxo authorization code + PKCE)
+      grantType: 'authorization_code',
       clientId: clientId!,
-      code: authorizationCode,
-      codeVerifier: authorizationCodeVerifier,
+      clientSecret: clientSecret!,
+      authorizationCode: authorizationCode,
+      authorizationCodeVerifier: authorizationCodeVerifier,
       redirectUri: REDIRECT_URI,
-      scope,
     });
     const requestBodyString = requestBody.toString();
 
@@ -181,12 +187,12 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
         ...(proxyBase && proxyKey ? { 'X-Shared-Key': '[MASKED]' } : {}),
       },
       bodyParams: {
-        grantType: 'authorization_code_pkce',
+        grantType: 'authorization_code',
         clientId: clientId!.substring(0, 8) + '...',
-        code: authorizationCode?.substring(0, 8) + '...',
-        codeVerifier: authorizationCodeVerifier?.substring(0, 8) + '...',
+        clientSecret: clientSecret!.substring(0, 4) + '...',
+        authorizationCode: authorizationCode?.substring(0, 8) + '...',
+        authorizationCodeVerifier: authorizationCodeVerifier?.substring(0, 8) + '...',
         redirectUri: REDIRECT_URI,
-        scope,
       },
       bodyString: requestBodyString
     });
