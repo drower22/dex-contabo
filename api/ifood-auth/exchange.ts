@@ -240,10 +240,13 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
     tokenData.refreshToken = tokenData.refreshToken || tokenData.refresh_token;
     tokenData.expiresIn = tokenData.expiresIn || tokenData.expires_in;
 
-    console.log('[ifood-auth/exchange] 📥 iFood response:', {
+    console.log('[ifood-auth/exchange] 📥 Raw tokenData:', tokenData);
+
+    console.log('[ifood-auth/exchange] 📥 iFood response (normalized):', {
       hasAccessToken: !!tokenData.accessToken,
       hasRefreshToken: !!tokenData.refreshToken,
       hasExpiresIn: !!tokenData.expiresIn,
+      expiresIn: tokenData.expiresIn,
       merchantIdFromResponse: tokenData.merchantId || tokenData.merchantID || tokenData.merchant_id || null
     });
 
@@ -316,6 +319,14 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       refreshTokenLength: encryptedRefreshToken.length
     });
 
+    // Calcular expires_at com segurança
+    const expiresInSecondsRaw = Number(tokenData.expiresIn ?? 0);
+    const expiresInSeconds = Number.isFinite(expiresInSecondsRaw) && expiresInSecondsRaw > 0
+      ? expiresInSecondsRaw
+      : 21600; // fallback padrão de 6h (documentação iFood)
+
+    const expiresAtIso = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
+
     // Prepare upsert data
     const upsertData = {
       account_id: resolvedAccountId,
@@ -323,7 +334,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       ifood_merchant_id: merchantId || null,
       access_token: encryptedAccessToken,
       refresh_token: encryptedRefreshToken,
-      expires_at: new Date(Date.now() + tokenData.expiresIn * 1000).toISOString(),
+      expires_at: expiresAtIso,
       status: 'connected',
     };
 
