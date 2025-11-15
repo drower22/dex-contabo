@@ -147,10 +147,16 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
         ? process.env.IFOOD_CLIENT_ID_REVIEWS
         : undefined;
 
-    if (!clientId) {
+    const clientSecret = scope === 'financial'
+      ? process.env.IFOOD_CLIENT_SECRET_FINANCIAL
+      : scope === 'reviews'
+        ? process.env.IFOOD_CLIENT_SECRET_REVIEWS
+        : undefined;
+
+    if (!clientId || !clientSecret) {
       res.status(400).json({ 
         error: 'Missing client credentials',
-        message: `IFOOD_CLIENT_ID_${scope?.toUpperCase()} not configured`
+        message: `IFOOD_CLIENT_ID/SECRET_${scope?.toUpperCase()} not configured`
       });
       return;
     }
@@ -175,10 +181,11 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
         : directUrl;
 
       const requestBody = new URLSearchParams({
-        grant_type: 'refresh_token',
+        // Conforme docs iFood: grantType=refresh_token + clientSecret em camelCase
+        grantType: 'refresh_token',
         clientId: clientId!,
-        refresh_token: refreshToken,
-        scope: targetScope,
+        clientSecret: clientSecret!,
+        refreshToken,
       });
       const requestBodyString = requestBody.toString();
 
@@ -225,12 +232,26 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       }
     }
 
+    // Normalizar campos retornados (camelCase vs snake_case)
+    tokenData.accessToken = tokenData.accessToken || tokenData.access_token;
+    tokenData.refreshToken = tokenData.refreshToken || tokenData.refresh_token;
+    tokenData.expiresIn = tokenData.expiresIn || tokenData.expires_in;
+
+    console.log('[ifood-auth/refresh] 📥 Raw tokenData:', tokenData);
+
+    const expiresInSecondsRaw = Number(tokenData.expiresIn ?? 0);
+    const expiresInSeconds = Number.isFinite(expiresInSecondsRaw) && expiresInSecondsRaw > 0
+      ? expiresInSecondsRaw
+      : 21600; // fallback de 6h
+
+    const expiresAtIso = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
+
     await supabase
       .from('ifood_store_auth')
       .update({
         access_token: await encryptToB64(tokenData.accessToken),
         refresh_token: await encryptToB64(tokenData.refreshToken),
-        expires_at: new Date(Date.now() + tokenData.expiresIn * 1000).toISOString(),
+        expires_at: expiresAtIso,
         status: 'connected',
       })
       .eq('account_id', internalAccountId)
