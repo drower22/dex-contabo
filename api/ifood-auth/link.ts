@@ -130,23 +130,20 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
     let data: any;
     try {
       const headers: any = {
-        'Accept-Encoding': 'identity',
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
       };
-      
-      // Adicionar chave do proxy se usando proxy
+
       if (proxyBase && proxyKey) {
         headers['X-Shared-Key'] = proxyKey;
       }
 
-      const response = await axios.post<string>(url, requestBodyString, {
+      const response = await fetch(url, {
+        method: 'POST',
         headers,
-        responseType: 'text',
-        transformResponse: [(value) => value],
-        validateStatus: () => true,
+        body: requestBodyString,
       });
 
-      const rawBody = response.data ?? '';
+      const rawBody = await response.text();
       let parsedBody: any = rawBody;
       try {
         parsedBody = rawBody ? JSON.parse(rawBody) : rawBody;
@@ -154,16 +151,18 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
         // Mantém como texto
       }
 
+      const headersObj = Object.fromEntries(response.headers.entries());
+
       console.log('[ifood-auth/link] 📥 iFood API response:', {
         status: response.status,
         statusText: response.statusText,
-        headers: response.headers,
+        headers: headersObj,
         rawBody,
         parsedType: typeof parsedBody,
-        bodyLength: requestBodyString.length,
+        bodyLength: rawBody ? rawBody.length : 0,
       });
 
-      if (response.status >= 400) {
+      if (!response.ok) {
         console.warn('[ifood-auth/link] ❌ iFood API returned non-2xx', { traceId, status: response.status, rawBody });
         res.status(response.status).json({
           error: 'Falha ao solicitar código de autorização do iFood',
@@ -175,25 +174,15 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
       data = parsedBody;
       console.log('[ifood-auth/link] ✅ iFood API response body:', JSON.stringify(data, null, 2));
     } catch (error: any) {
-      if (axios.isAxiosError(error)) {
-        console.error('[ifood-auth/link] ❌ Axios error calling iFood API', {
-          traceId,
-          status: error.response?.status,
-          data: error.response?.data,
-          message: error.message,
-        });
-        res.status(error.response?.status || 500).json({ 
-          error: 'Falha ao solicitar código de autorização do iFood',
-          details: error.response?.data 
-        });
-        return;
-      } else {
-        console.error('[ifood-auth/link] ❌ Generic error calling iFood API', {
-          traceId,
-          error: error?.message,
-        });
-        throw error;
-      }
+      console.error('[ifood-auth/link] ❌ Error calling iFood API', {
+        traceId,
+        message: error?.message,
+      });
+      res.status(500).json({
+        error: 'Falha ao solicitar código de autorização do iFood',
+        details: error?.message ?? 'Unknown error',
+      });
+      return;
     }
 
     // ✅ Salvar apenas link_code e verifier (sem merchantId ainda)
