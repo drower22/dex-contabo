@@ -131,7 +131,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
     try {
       const headers: any = {
         'Content-Type': 'application/x-www-form-urlencoded',
-        // Evita problemas de decompressão (Z_DATA_ERROR) no Node/undici ao falar com proxydex/Cloudflare
+        // Mantém identity para evitar problemas de compressão no caminho
         'accept-encoding': 'identity',
       };
 
@@ -139,13 +139,14 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
         headers['X-Shared-Key'] = proxyKey;
       }
 
-      const response = await fetch(url, {
-        method: 'POST',
+      const axiosResponse = await axios.post(url, requestBodyString, {
         headers,
-        body: requestBodyString,
+        responseType: 'text',
+        // Importante: não deixar axios tentar transformar automaticamente
+        transformResponse: [(data) => data],
       });
 
-      const rawBody = await response.text();
+      const rawBody = axiosResponse.data as string;
       let parsedBody: any = rawBody;
       try {
         parsedBody = rawBody ? JSON.parse(rawBody) : rawBody;
@@ -153,20 +154,20 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
         // Mantém como texto
       }
 
-      const headersObj = Object.fromEntries(response.headers.entries());
+      const headersObj = axiosResponse.headers;
 
       console.log('[ifood-auth/link] 📥 iFood API response:', {
-        status: response.status,
-        statusText: response.statusText,
+        status: axiosResponse.status,
+        statusText: axiosResponse.statusText,
         headers: headersObj,
         rawBody,
         parsedType: typeof parsedBody,
         bodyLength: rawBody ? rawBody.length : 0,
       });
 
-      if (!response.ok) {
-        console.warn('[ifood-auth/link] ❌ iFood API returned non-2xx', { traceId, status: response.status, rawBody });
-        res.status(response.status).json({
+      if (axiosResponse.status < 200 || axiosResponse.status >= 300) {
+        console.warn('[ifood-auth/link] ❌ iFood API returned non-2xx', { traceId, status: axiosResponse.status, rawBody });
+        res.status(axiosResponse.status).json({
           error: 'Falha ao solicitar código de autorização do iFood',
           details: parsedBody || rawBody,
         });
