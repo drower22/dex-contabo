@@ -177,6 +177,9 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
       console.error('[ifood-auth/link] ❌ Error calling iFood API', {
         traceId,
         message: error?.message,
+        name: error?.name,
+        stack: error?.stack,
+        cause: (error as any)?.cause,
       });
       res.status(500).json({
         error: 'Falha ao solicitar código de autorização do iFood',
