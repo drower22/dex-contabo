@@ -131,6 +131,8 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
     try {
       const headers: any = {
         'Content-Type': 'application/x-www-form-urlencoded',
+        // Evita problemas de decompressão (Z_DATA_ERROR) no Node/undici ao falar com proxydex/Cloudflare
+        'accept-encoding': 'identity',
       };
 
       if (proxyBase && proxyKey) {
