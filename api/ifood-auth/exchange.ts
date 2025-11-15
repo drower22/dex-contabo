@@ -167,6 +167,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       redirect_uri: REDIRECT_URI,
       scope,
     });
+    const requestBodyString = requestBody.toString();
 
     // 🔍 Log detalhado do request
     console.log('[ifood-auth/exchange] 📤 Request details:', {
@@ -185,7 +186,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
         redirect_uri: REDIRECT_URI,
         scope,
       },
-      bodyString: requestBody.toString()
+      bodyString: requestBodyString
     });
 
     let tokenData: any;
@@ -199,7 +200,7 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
         headers['X-Shared-Key'] = proxyKey;
       }
 
-      const response = await axios.post(url, requestBody, {
+      const response = await axios.post(url, requestBodyString, {
         headers,
         responseType: 'json',
       });

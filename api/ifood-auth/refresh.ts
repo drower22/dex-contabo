@@ -180,6 +180,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
         refresh_token: refreshToken,
         scope: targetScope,
       });
+      const requestBodyString = requestBody.toString();
 
       const headers: any = {
         'Accept-Encoding': 'identity',
@@ -190,7 +191,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
         headers['X-Shared-Key'] = proxyKey;
       }
 
-      const { data } = await axios.post(url, requestBody, {
+      const { data } = await axios.post(url, requestBodyString, {
         headers,
         responseType: 'json',
       });
@@ -199,6 +200,7 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       console.log('[ifood-auth/refresh] OAuth request successful', {
         traceId,
         keys: tokenData ? Object.keys(tokenData) : null,
+        bodyLength: requestBodyString.length,
       });
     } catch (error: any) {
       if (axios.isAxiosError(error)) {

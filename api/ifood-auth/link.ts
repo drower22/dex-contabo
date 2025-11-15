@@ -103,12 +103,14 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
     const requestBody = new URLSearchParams({
       clientId: clientId,  // ✅ CORRIGIDO: camelCase
     });
+    const requestBodyString = requestBody.toString();
 
     console.log('[ifood-auth/link] 📤 Sending request to iFood API:', {
       url: `${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`,
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      bodyParams: { clientId: `${clientId.substring(0, 8)}...` }
+      bodyParams: { clientId: `${clientId.substring(0, 8)}...` },
+      bodyString: requestBodyString
     });
 
     // 🔧 Usar proxy se configurado, senão URL direta
@@ -137,7 +139,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
         headers['X-Shared-Key'] = proxyKey;
       }
 
-      const response = await axios.post<string>(url, requestBody, {
+      const response = await axios.post<string>(url, requestBodyString, {
         headers,
         responseType: 'text',
         transformResponse: [(value) => value],
@@ -158,6 +160,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
         headers: response.headers,
         rawBody,
         parsedType: typeof parsedBody,
+        bodyLength: requestBodyString.length,
       });
 
       if (response.status >= 400) {
