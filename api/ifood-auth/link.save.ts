@@ -17,7 +17,7 @@ const linkSaveHandler = async (req: VercelRequest, res: VercelResponse): Promise
     return;
   }
 
-  const { accountId, scope, userCode, authorizationCodeVerifier, verificationUrl, verificationUrlComplete, expiresIn } = req.body || {};
+  const { accountId, scope, userCode, authorizationCodeVerifier } = req.body || {};
 
   const traceId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -65,9 +65,6 @@ const linkSaveHandler = async (req: VercelRequest, res: VercelResponse): Promise
         link_code: userCode,
         verifier: authorizationCodeVerifier,
         status: 'pending',
-        verification_url: verificationUrl,
-        verification_url_complete: verificationUrlComplete,
-        expires_in: expiresIn,
       }, { onConflict: 'account_id,scope' });
 
     if (saveError) {
