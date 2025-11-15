@@ -160,11 +160,13 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       : directUrl;
 
     const requestBody = new URLSearchParams({
-      grant_type: 'authorization_code_pkce',
+      // iFood OAuth espera parâmetros em camelCase, assim como no endpoint de userCode
+      // Se usarmos grant_type/code_verifier, o backend passa a enxergar grantType como null
+      grantType: 'authorization_code_pkce',
       clientId: clientId!,
       code: authorizationCode,
-      code_verifier: authorizationCodeVerifier,
-      redirect_uri: REDIRECT_URI,
+      codeVerifier: authorizationCodeVerifier,
+      redirectUri: REDIRECT_URI,
       scope,
     });
     const requestBodyString = requestBody.toString();
@@ -179,11 +181,11 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
         ...(proxyBase && proxyKey ? { 'X-Shared-Key': '[MASKED]' } : {}),
       },
       bodyParams: {
-        grant_type: 'authorization_code_pkce',
+        grantType: 'authorization_code_pkce',
         clientId: clientId!.substring(0, 8) + '...',
         code: authorizationCode?.substring(0, 8) + '...',
-        code_verifier: authorizationCodeVerifier?.substring(0, 8) + '...',
-        redirect_uri: REDIRECT_URI,
+        codeVerifier: authorizationCodeVerifier?.substring(0, 8) + '...',
+        redirectUri: REDIRECT_URI,
         scope,
       },
       bodyString: requestBodyString
