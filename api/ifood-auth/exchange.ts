@@ -327,11 +327,11 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
 
     const expiresAtIso = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
 
-    // Prepare upsert data
+    // Prepare upsert data (sem forçar merchantId; ele será consolidado em finalMerchantId abaixo)
     const upsertData = {
       account_id: resolvedAccountId,
       scope: scope || 'reviews',
-      ifood_merchant_id: merchantId || null,
+      ifood_merchant_id: merchantId || storedMerchantId || existingMerchantId || null,
       access_token: encryptedAccessToken,
       refresh_token: encryptedRefreshToken,
       expires_at: expiresAtIso,
@@ -365,21 +365,33 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
 
     console.log('[ifood-auth/exchange] ✅ Upsert successful:', savedData);
 
-    // Após salvar os tokens, atualiza a tabela 'accounts' com o merchantId correto
+    // Após salvar os tokens, consolida o merchantId final e garante persistência nas duas tabelas
     const finalMerchantId = merchantId || storedMerchantId || existingMerchantId;
     if (finalMerchantId) {
-      console.log('[ifood-auth/exchange] 📝 Updating accounts table with merchantId:', finalMerchantId);
-      const { error: updateError } = await supabase
-        .from('accounts')
-        .update({
-          ifood_merchant_id: finalMerchantId,
-        })
-        .eq('id', resolvedAccountId);
+      console.log('[ifood-auth/exchange] 📝 Updating accounts & ifood_store_auth with merchantId:', finalMerchantId);
 
-      if (updateError) {
-        console.error('[ifood-auth/exchange] ⚠️ Failed to update accounts:', updateError);
+      const [{ error: updateAccountsError }, { error: updateAuthError }] = await Promise.all([
+        supabase
+          .from('accounts')
+          .update({ ifood_merchant_id: finalMerchantId })
+          .eq('id', resolvedAccountId),
+        supabase
+          .from('ifood_store_auth')
+          .update({ ifood_merchant_id: finalMerchantId })
+          .eq('account_id', resolvedAccountId)
+          .eq('scope', scope || 'reviews'),
+      ]);
+
+      if (updateAccountsError) {
+        console.error('[ifood-auth/exchange] ⚠️ Failed to update accounts:', updateAccountsError);
       } else {
         console.log('[ifood-auth/exchange] ✅ Accounts table updated');
+      }
+
+      if (updateAuthError) {
+        console.error('[ifood-auth/exchange] ⚠️ Failed to update ifood_store_auth with merchantId:', updateAuthError);
+      } else {
+        console.log('[ifood-auth/exchange] ✅ ifood_store_auth updated with merchantId');
       }
     }
 
