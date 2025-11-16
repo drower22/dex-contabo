@@ -10,6 +10,12 @@
  * - Chave de 256 bits (32 bytes) em base64
  */
 
+// Importar crypto para Node.js
+import { webcrypto } from 'node:crypto';
+
+// Use Node.js Web Crypto API (compatível com Deno que já tem crypto global)
+const cryptoAPI = typeof crypto !== 'undefined' ? crypto : webcrypto;
+
 /**
  * Obtém chave de criptografia do ambiente.
  * Compatível com Node.js e Deno
@@ -41,7 +47,7 @@ function getKeyBytes(): Uint8Array {
  */
 async function importKey() {
   const keyBytes = getKeyBytes();
-  return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  return cryptoAPI.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
 /**
@@ -51,9 +57,9 @@ async function importKey() {
  */
 export async function encryptToB64(plain: string): Promise<string> {
   const key = await importKey();
-  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const iv = cryptoAPI.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(String(plain));
-  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+  const cipher = await cryptoAPI.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
   const payload = new Uint8Array(iv.length + (cipher as ArrayBuffer).byteLength);
   payload.set(iv, 0);
   payload.set(new Uint8Array(cipher), iv.length);
@@ -97,7 +103,7 @@ export async function decryptFromB64(b64: string): Promise<string> {
     
     const iv = bytes.slice(0, 12);
     const data = bytes.slice(12);
-    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
+    const plainBuf = await cryptoAPI.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
     return new TextDecoder().decode(plainBuf);
   } catch (e: any) {
     const hasKey = (typeof process !== 'undefined' && !!process.env?.ENCRYPTION_KEY) 
