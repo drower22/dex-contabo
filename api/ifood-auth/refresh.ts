@@ -209,6 +209,17 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       });
       const requestBodyString = requestBody.toString();
 
+      // Log explícito do que está sendo enviado para o iFood (sem expor segredos completos)
+      console.log('[ifood-auth/refresh] 📤 OAuth request payload (masked)', {
+        traceId,
+        url,
+        grantType: 'refresh_token',
+        clientIdPreview: clientId.substring(0, 8) + '...',
+        refreshTokenPreview: typeof refreshToken === 'string' && refreshToken.length > 20
+          ? refreshToken.substring(0, 10) + '...' + refreshToken.substring(refreshToken.length - 5)
+          : refreshToken,
+      });
+
       const headers: any = {
         'Accept-Encoding': 'identity',
         'Content-Type': 'application/x-www-form-urlencoded',
