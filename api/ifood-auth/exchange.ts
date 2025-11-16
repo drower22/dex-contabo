@@ -308,7 +308,12 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       }
     }
 
-    console.log('[ifood-auth/exchange] 🏪 Final merchantId:', merchantId);
+    console.log('[ifood-auth/exchange] 🏪 Final merchantId resolved:', {
+      merchantId,
+      storedMerchantId,
+      existingMerchantId,
+      willUse: merchantId || storedMerchantId || existingMerchantId || 'NULL'
+    });
 
     // Encrypt tokens
     console.log('[ifood-auth/exchange] 🔐 Encrypting tokens...');
