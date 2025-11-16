@@ -186,13 +186,20 @@ async function handlePost(req: VercelRequest, res: VercelResponse) {
         if (Number.isFinite(remainingMs) && remainingMs > 0) {
           try {
             const currentAccess = await decryptFromB64(cached.access_token);
-            accessToken = currentAccess;
-            tokenPreview = `${accessToken.slice(0, 6)}...${accessToken.slice(-4)}`;
-            await logToDb('info', 'auth', 'Usando access_token em cache (sem refresh)', {
-              tokenPreview,
-              remainingSeconds: Math.floor(remainingMs / 1000),
-            });
-            console.info('[ifood-ingest] using_cached_access_token', { traceId, tokenPreview });
+            if (typeof currentAccess === 'string' && currentAccess.length > 0 && currentAccess !== 'undefined') {
+              accessToken = currentAccess;
+              tokenPreview = `${accessToken.slice(0, 6)}...${accessToken.slice(-4)}`;
+              await logToDb('info', 'auth', 'Usando access_token em cache (sem refresh)', {
+                tokenPreview,
+                remainingSeconds: Math.floor(remainingMs / 1000),
+              });
+              console.info('[ifood-ingest] using_cached_access_token', { traceId, tokenPreview });
+            } else {
+              await logToDb('error', 'auth', 'access_token em cache inválido (vazio ou "undefined")', {
+                accountId,
+                currentAccessPreview: typeof currentAccess === 'string' ? currentAccess.slice(0, 20) : typeof currentAccess,
+              });
+            }
           } catch (e: any) {
             await logToDb('error', 'auth', 'Falha ao descriptografar access_token em cache', { error: e?.message, accountId });
           }

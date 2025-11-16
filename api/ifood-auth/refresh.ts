@@ -64,54 +64,81 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
   const traceId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   console.log('[ifood-auth/refresh] ⇢ start', { traceId, storeId, scopeParam, scope });
 
+  const logConciliation = async (
+    level: 'debug' | 'info' | 'warn' | 'error',
+    step: string,
+    message: string,
+    metadata?: any,
+  ) => {
+    try {
+      await supabase.from('ifood_conciliation_logs').insert({
+        run_id: null,
+        trace_id: traceId,
+        level,
+        step,
+        message,
+        metadata: metadata ? JSON.parse(JSON.stringify(metadata)) : null,
+      });
+    } catch (err: any) {
+      console.error('[ifood-auth/refresh] failed_to_log_conciliation', {
+        traceId,
+        step,
+        error: err?.message,
+      });
+    }
+  };
+
   try {
     // 1. Encontrar a conta. Aceita:
     //    a) storeId = ifood_merchant_id (padrão)
     //    b) storeId = accounts.id (UUID) — fallback
     let internalAccountId: string | null = null;
+    let merchantIdForLogs: string | null = null;
     {
       const { data: byMerchant } = await supabase
         .from('accounts')
-        .select('id')
+        .select('id, ifood_merchant_id')
         .eq('ifood_merchant_id', storeId)
         .maybeSingle();
-      if (byMerchant?.id) internalAccountId = byMerchant.id as string;
+      if (byMerchant?.id) {
+        internalAccountId = byMerchant.id as string;
+        merchantIdForLogs = (byMerchant.ifood_merchant_id as string | null) ?? null;
+      }
     }
     if (!internalAccountId) {
       // fallback: tratar storeId como UUID de accounts.id
       const { data: byUuid } = await supabase
         .from('accounts')
-        .select('id')
+        .select('id, ifood_merchant_id')
         .eq('id', storeId)
         .maybeSingle();
-      if (byUuid?.id) internalAccountId = byUuid.id as string;
+      if (byUuid?.id) {
+        internalAccountId = byUuid.id as string;
+        merchantIdForLogs = (byUuid.ifood_merchant_id as string | null) ?? merchantIdForLogs;
+      }
     }
     if (!internalAccountId) {
+      await logConciliation('error', 'refresh', 'storeId não mapeia para nenhuma conta', { storeId, scope, scopeParam });
       res.status(404).json({ error: 'storeId não mapeia para nenhuma conta (merchant_id ou accounts.id)' });
       return;
     }
 
     // 2. Usar o ID interno para buscar o token de atualização
-    // 2. Buscar token por escopo, com fallback para o escopo oposto
-    const wantedScope = scope || 'reviews';
-    let { data: authData } = await supabase
+    // Para o backend financeiro, preferimos SEMPRE o escopo 'financial'
+    const wantedScope = scope || 'financial';
+    const { data: authData } = await supabase
       .from('ifood_store_auth')
       .select('refresh_token, access_token, expires_at')
       .eq('account_id', internalAccountId)
       .eq('scope', wantedScope)
       .maybeSingle();
     if (!authData) {
-      const opposite = wantedScope === 'financial' ? 'reviews' : 'financial';
-      const { data: fallbackData } = await supabase
-        .from('ifood_store_auth')
-        .select('refresh_token, access_token, expires_at')
-        .eq('account_id', internalAccountId)
-        .eq('scope', opposite)
-        .maybeSingle();
-      authData = fallbackData || undefined as any;
-    }
-    if (!authData) {
       console.warn('[ifood-auth/refresh] No auth data found', { traceId, internalAccountId, wantedScope });
+      await logConciliation('error', 'refresh', 'Refresh token não encontrado para a loja', {
+        internalAccountId,
+        wantedScope,
+        merchantId: merchantIdForLogs,
+      });
       res.status(404).json({ error: 'not_found', message: 'Refresh token não encontrado para a loja (verifique se o vínculo foi concluído)' });
       return;
     }
@@ -122,6 +149,11 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
 
     if (!authData.refresh_token) {
       console.warn('[ifood-auth/refresh] Empty refresh token', { traceId, internalAccountId, wantedScope });
+      await logConciliation('error', 'refresh', 'Refresh token vazio. Refaça o vínculo.', {
+        internalAccountId,
+        wantedScope,
+        merchantId: merchantIdForLogs,
+      });
       res.status(404).json({ error: 'not_found', message: 'Refresh token vazio. Refaça o vínculo.' });
       return;
     }
@@ -230,6 +262,14 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
             });
           }
 
+          await logConciliation('error', 'refresh', 'Invalid refresh token no iFood', {
+            internalAccountId,
+            wantedScope,
+            merchantId: merchantIdForLogs,
+            status,
+            data,
+          });
+
           res.status(401).json({
             error: 'refresh_invalid',
             message: 'Refresh token inválido no iFood. É necessário refazer o vínculo (Gerar LinkCode + autorizar + Trocar Código).',
@@ -238,6 +278,14 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
           });
           return;
         }
+
+        await logConciliation('error', 'refresh', 'Falha ao renovar token com iFood', {
+          internalAccountId,
+          wantedScope,
+          merchantId: merchantIdForLogs,
+          status: status || 500,
+          data,
+        });
 
         res.status(status || 500).json({
           error: 'Falha ao renovar token com iFood',
@@ -260,7 +308,12 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
     tokenData.refreshToken = tokenData.refreshToken || tokenData.refresh_token;
     tokenData.expiresIn = tokenData.expiresIn || tokenData.expires_in;
 
-    console.log('[ifood-auth/refresh] 📥 Raw tokenData:', tokenData);
+    console.log('[ifood-auth/refresh] 📥 iFood response (normalized):', {
+      hasAccessToken: !!tokenData.accessToken,
+      hasRefreshToken: !!tokenData.refreshToken,
+      hasExpiresIn: !!tokenData.expiresIn,
+      expiresIn: tokenData.expiresIn,
+    });
 
     const expiresInSecondsRaw = Number(tokenData.expiresIn ?? 0);
     const expiresInSeconds = Number.isFinite(expiresInSecondsRaw) && expiresInSecondsRaw > 0
@@ -284,6 +337,13 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       traceId,
       internalAccountId,
       wantedScope,
+      expiresIn: tokenData.expiresIn,
+    });
+
+    await logConciliation('info', 'refresh', 'Token refreshed successfully', {
+      internalAccountId,
+      wantedScope,
+      merchantId: merchantIdForLogs,
       expiresIn: tokenData.expiresIn,
     });
 
