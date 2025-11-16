@@ -167,13 +167,13 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       : directUrl;
 
     const requestBody = new URLSearchParams({
-      // IMPORTANTE: iFood API espera snake_case, não camelCase!
-      grant_type: 'authorization_code',
-      client_id: clientId!,
-      client_secret: clientSecret!,
-      authorization_code: authorizationCode,
-      authorization_code_verifier: authorizationCodeVerifier,
-      redirect_uri: REDIRECT_URI,
+      // Conforme documentação oficial do iFood para /oauth/token (fluxo authorization code + PKCE)
+      grantType: 'authorization_code',
+      clientId: clientId!,
+      clientSecret: clientSecret!,
+      authorizationCode: authorizationCode,
+      authorizationCodeVerifier: authorizationCodeVerifier,
+      redirectUri: REDIRECT_URI,
     });
     const requestBodyString = requestBody.toString();
 
@@ -187,12 +187,12 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
         ...(proxyBase && proxyKey ? { 'X-Shared-Key': '[MASKED]' } : {}),
       },
       bodyParams: {
-        grant_type: 'authorization_code',
-        client_id: clientId!.substring(0, 8) + '...',
-        client_secret: clientSecret!.substring(0, 4) + '...',
-        authorization_code: authorizationCode?.substring(0, 8) + '...',
-        authorization_code_verifier: authorizationCodeVerifier?.substring(0, 8) + '...',
-        redirect_uri: REDIRECT_URI,
+        grantType: 'authorization_code',
+        clientId: clientId!.substring(0, 8) + '...',
+        clientSecret: clientSecret!.substring(0, 4) + '...',
+        authorizationCode: authorizationCode?.substring(0, 8) + '...',
+        authorizationCodeVerifier: authorizationCodeVerifier?.substring(0, 8) + '...',
+        redirectUri: REDIRECT_URI,
       },
       bodyString: requestBodyString
     });
