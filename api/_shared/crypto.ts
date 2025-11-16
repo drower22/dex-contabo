@@ -1,34 +1,36 @@
 /**
- * @file dex-contabo/api/_shared/crypto.ts
- * @description Utilitários de criptografia AES-GCM para Contabo deployment
+ * @file shared/crypto.ts
+ * @description Utilitários de criptografia AES-GCM compartilhados
  * 
- * Versão simplificada do crypto.ts principal, sem JSDoc extenso.
- * Fornece funções básicas para criptografar/descriptografar tokens.
+ * ÚNICO arquivo de crypto para todo o projeto!
+ * Usado por: Contabo, Vercel, Supabase Edge Functions
  * 
  * ALGORITMO: AES-GCM (Galois/Counter Mode)
  * - IV de 12 bytes gerado aleatoriamente
  * - Chave de 256 bits (32 bytes) em base64
- * 
- * REQUISITOS:
- * - Node.js 18+ (Web Crypto API)
- * - ENCRYPTION_KEY em base64 (32 bytes)
  */
-
-import { webcrypto } from 'node:crypto';
-
-// Use Node.js Web Crypto API
-const crypto = webcrypto;
 
 /**
  * Obtém chave de criptografia do ambiente.
- * @returns Chave como Uint8Array
- * @throws Se ENCRYPTION_KEY ausente ou inválida
+ * Compatível com Node.js e Deno
  */
 function getKeyBytes(): Uint8Array {
-  const b64 = process.env.ENCRYPTION_KEY || '';
+  // Suporta tanto process.env (Node) quanto Deno.env (Deno)
+  const b64 = (typeof process !== 'undefined' && process.env?.ENCRYPTION_KEY) 
+    || (typeof Deno !== 'undefined' && Deno.env?.get('ENCRYPTION_KEY')) 
+    || '';
+  
   if (!b64) throw new Error('Missing ENCRYPTION_KEY');
+  
   try {
-    return Uint8Array.from(Buffer.from(b64, 'base64'));
+    // Método universal: funciona em Node.js e Deno
+    if (typeof Buffer !== 'undefined') {
+      // Node.js
+      return Uint8Array.from(Buffer.from(b64, 'base64'));
+    } else {
+      // Deno
+      return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    }
   } catch {
     throw new Error('Invalid ENCRYPTION_KEY: must be base64');
   }
@@ -36,7 +38,6 @@ function getKeyBytes(): Uint8Array {
 
 /**
  * Importa chave para Web Crypto API.
- * @returns Promise com CryptoKey
  */
 async function importKey() {
   const keyBytes = getKeyBytes();
@@ -51,19 +52,26 @@ async function importKey() {
 export async function encryptToB64(plain: string): Promise<string> {
   const key = await importKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const enc = new TextEncoder().encode(String(plain));
-  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc);
+  const encoded = new TextEncoder().encode(String(plain));
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
   const payload = new Uint8Array(iv.length + (cipher as ArrayBuffer).byteLength);
   payload.set(iv, 0);
-  payload.set(new Uint8Array(cipher as ArrayBuffer), iv.length);
-  return Buffer.from(payload).toString('base64');
+  payload.set(new Uint8Array(cipher), iv.length);
+  
+  // Método universal de encoding
+  if (typeof Buffer !== 'undefined') {
+    // Node.js
+    return Buffer.from(payload).toString('base64');
+  } else {
+    // Deno
+    return btoa(String.fromCharCode(...payload));
+  }
 }
 
 /**
  * Descriptografa string de base64 usando AES-GCM.
  * @param b64 - Texto criptografado em base64
  * @returns Promise com texto descriptografado
- * @throws Se input inválido ou descriptografia falhar
  */
 export async function decryptFromB64(b64: string): Promise<string> {
   try {
@@ -73,8 +81,15 @@ export async function decryptFromB64(b64: string): Promise<string> {
     
     const key = await importKey();
     
-    // Use atob() like Supabase Edge Functions for compatibility
-    const bytes = Uint8Array.from(Buffer.from(b64, 'base64').toString('binary'), (c) => c.charCodeAt(0));
+    // Método universal de decoding
+    let bytes: Uint8Array;
+    if (typeof Buffer !== 'undefined') {
+      // Node.js
+      bytes = new Uint8Array(Buffer.from(b64, 'base64'));
+    } else {
+      // Deno
+      bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    }
     
     if (bytes.length < 13) {
       throw new Error(`Invalid encrypted data: too short (${bytes.length} bytes, expected at least 13)`);
@@ -85,12 +100,14 @@ export async function decryptFromB64(b64: string): Promise<string> {
     const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
     return new TextDecoder().decode(plainBuf);
   } catch (e: any) {
+    const hasKey = (typeof process !== 'undefined' && !!process.env?.ENCRYPTION_KEY) 
+      || (typeof Deno !== 'undefined' && !!Deno.env?.get('ENCRYPTION_KEY'));
+    
     console.error('[crypto] decryptFromB64 error:', {
       error: e.message,
-      hasKey: !!process.env.ENCRYPTION_KEY,
+      hasKey,
       inputLength: b64?.length,
       inputPreview: b64?.substring(0, 20) + '...',
-      stack: e.stack,
     });
     throw new Error(`Decryption failed: ${e.message}`);
   }
