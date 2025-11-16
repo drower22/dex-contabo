@@ -42,10 +42,10 @@ async function refreshLabHandler(req: VercelRequest, res: VercelResponse): Promi
     : directUrl;
 
   const requestBody = new URLSearchParams({
-    grantType: effectiveGrant,
-    clientId,
-    clientSecret,
-    refreshToken,
+    grant_type: effectiveGrant,
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken,
   });
 
   const requestBodyString = requestBody.toString();

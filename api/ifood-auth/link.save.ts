@@ -17,7 +17,7 @@ const linkSaveHandler = async (req: VercelRequest, res: VercelResponse): Promise
     return;
   }
 
-  const { accountId, scope, userCode, authorizationCodeVerifier } = req.body || {};
+  const { accountId, scope, userCode, authorizationCodeVerifier, merchantId } = req.body || {};
 
   const traceId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -27,6 +27,7 @@ const linkSaveHandler = async (req: VercelRequest, res: VercelResponse): Promise
     scope,
     hasUserCode: !!userCode,
     hasVerifier: !!authorizationCodeVerifier,
+    merchantId: merchantId || null,
   });
 
   if (!accountId || typeof accountId !== 'string') {
@@ -57,15 +58,24 @@ const linkSaveHandler = async (req: VercelRequest, res: VercelResponse): Promise
   }
 
   try {
+    // Preparar dados para upsert (incluir merchantId se fornecido)
+    const upsertData: any = {
+      account_id: accountId,
+      scope: scopeValue,
+      link_code: userCode,
+      verifier: authorizationCodeVerifier,
+      status: 'pending',
+    };
+    
+    // Adicionar merchantId se fornecido pelo usuário no modal
+    if (merchantId && typeof merchantId === 'string' && merchantId.trim()) {
+      upsertData.ifood_merchant_id = merchantId.trim();
+      console.log('[ifood-auth/link.save] 💾 Salvando merchantId fornecido pelo usuário:', merchantId.trim());
+    }
+    
     const { error: saveError } = await supabase
       .from('ifood_store_auth')
-      .upsert({
-        account_id: accountId,
-        scope: scopeValue,
-        link_code: userCode,
-        verifier: authorizationCodeVerifier,
-        status: 'pending',
-      }, { onConflict: 'account_id,scope' });
+      .upsert(upsertData, { onConflict: 'account_id,scope' });
 
     if (saveError) {
       console.error('[ifood-auth/link.save] ❌ Error saving to database', { traceId, saveError });
@@ -74,6 +84,20 @@ const linkSaveHandler = async (req: VercelRequest, res: VercelResponse): Promise
     }
 
     console.log('[ifood-auth/link.save] ✅ Link stored successfully', { traceId, accountId, scope: scopeValue });
+
+    // Atualizar também a tabela accounts com o merchantId
+    if (merchantId && typeof merchantId === 'string' && merchantId.trim()) {
+      const { error: updateAccountError } = await supabase
+        .from('accounts')
+        .update({ ifood_merchant_id: merchantId.trim() })
+        .eq('id', accountId);
+      
+      if (updateAccountError) {
+        console.warn('[ifood-auth/link.save] ⚠️ Failed to update accounts table:', updateAccountError);
+      } else {
+        console.log('[ifood-auth/link.save] ✅ accounts.ifood_merchant_id updated');
+      }
+    }
 
     res.status(200).json({
       ok: true,

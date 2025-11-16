@@ -230,11 +230,11 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
         : directUrl;
 
       const requestBody = new URLSearchParams({
-        // Conforme docs iFood: grantType=refresh_token + clientSecret em camelCase
-        grantType: 'refresh_token',
-        clientId: clientId!,
-        clientSecret: clientSecret!,
-        refreshToken,
+        // IMPORTANTE: iFood API espera snake_case, não camelCase!
+        grant_type: 'refresh_token',
+        client_id: clientId!,
+        client_secret: clientSecret!,
+        refresh_token: refreshToken,
       });
       const requestBodyString = requestBody.toString();
 
@@ -242,9 +242,9 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       console.log('[ifood-auth/refresh] 📤 OAuth request payload (masked)', {
         traceId,
         url,
-        grantType: 'refresh_token',
-        clientIdPreview: clientId.substring(0, 8) + '...',
-        refreshTokenPreview: typeof refreshToken === 'string' && refreshToken.length > 20
+        grant_type: 'refresh_token',
+        client_id_preview: clientId.substring(0, 8) + '...',
+        refresh_token_preview: typeof refreshToken === 'string' && refreshToken.length > 20
           ? refreshToken.substring(0, 10) + '...' + refreshToken.substring(refreshToken.length - 5)
           : refreshToken,
       });

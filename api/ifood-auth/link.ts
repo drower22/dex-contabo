@@ -101,7 +101,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
     }
 
     const requestBody = new URLSearchParams({
-      clientId: clientId,  // ✅ CORRIGIDO: camelCase
+      client_id: clientId,  // ✅ CORRIGIDO: snake_case
     });
     const requestBodyString = requestBody.toString();
 
@@ -109,7 +109,7 @@ const linkHandler = async (req: VercelRequest, res: VercelResponse): Promise<voi
       url: `${IFOOD_BASE_URL}/authentication/v1.0/oauth/userCode`,
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      bodyParams: { clientId: `${clientId.substring(0, 8)}...` },
+      bodyParams: { client_id: `${clientId.substring(0, 8)}...` },
       bodyString: requestBodyString
     });
 
