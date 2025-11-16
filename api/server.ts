@@ -139,6 +139,9 @@ const reconciliationDebugHandler = loadHandler('./ingest/ifood-reconciliation-de
 // Carregar handlers de APIs diretas do iFood
 const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation');
 
+// Carregar handlers de cron
+const refreshTokensCronHandler = loadHandler('./cron/refresh-tokens');
+
 // Proxy para iFood usando a função Vercel compartilhada
 app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
   const base = process.env.IFOOD_PROXY_BASE?.trim();
@@ -287,6 +290,16 @@ if (ifoodReconciliationHandler) {
 } else {
   app.all('/api/ifood/reconciliation', (req: Request, res: Response) => {
     res.status(500).json({ error: 'iFood reconciliation handler not loaded' });
+  });
+}
+
+// Rotas de cron
+if (refreshTokensCronHandler) {
+  app.post('/api/cron/refresh-tokens', adaptVercelHandler(refreshTokensCronHandler));
+  console.log('✅ Refresh tokens cron handler loaded');
+} else {
+  app.post('/api/cron/refresh-tokens', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Refresh tokens cron handler not loaded' });
   });
 }
 
