@@ -243,25 +243,6 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
         // Tratar caso específico: refresh token inválido no iFood
         const msg = data?.error?.message || data?.message || '';
         if (status === 401 && typeof msg === 'string' && msg.includes('Invalid refresh token')) {
-          try {
-            await supabase
-              .from('ifood_store_auth')
-              .update({
-                access_token: null,
-                expires_at: null,
-                status: 'pending',
-              })
-              .eq('account_id', internalAccountId)
-              .eq('scope', wantedScope);
-          } catch (dbErr: any) {
-            console.error('[ifood-auth/refresh] Failed to mark token as pending after invalid refresh', {
-              traceId,
-              internalAccountId,
-              wantedScope,
-              error: dbErr?.message,
-            });
-          }
-
           await logConciliation('error', 'refresh', 'Invalid refresh token no iFood', {
             internalAccountId,
             wantedScope,
@@ -270,9 +251,42 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
             data,
           });
 
+          // Nessa situação específica, NÃO vamos apagar o token salvo no Supabase.
+          // Em vez disso, tentamos devolver o access_token atual (se existir e for descriptografável)
+          // para que o frontend (FinanceTestPage) ainda possa visualizar/usar o token.
+          let currentAccess: string | null = null;
+          try {
+            // authData ainda está disponível do escopo superior
+            if (authData?.access_token) {
+              currentAccess = await decryptFromB64(authData.access_token as string);
+            }
+          } catch (decErr: any) {
+            console.error('[ifood-auth/refresh] Failed to decrypt existing access_token after invalid refresh', {
+              traceId,
+              internalAccountId,
+              wantedScope,
+              error: decErr?.message,
+            });
+          }
+
+          // Se conseguirmos descriptografar o token atual, retornamos 200 com ele,
+          // sinalizando que o refresh falhou mas o token existente ainda está disponível.
+          if (currentAccess) {
+            res.status(200).json({
+              access_token: currentAccess,
+              refresh_token: refreshToken,
+              expires_in: 0,
+              error: 'refresh_invalid',
+              message: 'Refresh token inválido no iFood. Usando access_token atual salvo.',
+              traceId,
+            });
+            return;
+          }
+
+          // Se não houver access_token utilizável, mantemos o comportamento de erro 401.
           res.status(401).json({
             error: 'refresh_invalid',
-            message: 'Refresh token inválido no iFood. É necessário refazer o vínculo (Gerar LinkCode + autorizar + Trocar Código).',
+            message: 'Refresh token inválido no iFood e nenhum access_token atual pôde ser utilizado.',
             details: data,
             traceId,
           });
