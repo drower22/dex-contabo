@@ -116,21 +116,9 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       return;
     }
 
-    // 2.a. Se o access_token atual ainda está válido por >120s, reutilize para evitar rate limit
-    try {
-      const expiresAt = authData?.expires_at ? new Date(authData.expires_at) : null;
-      const remainingMs = expiresAt ? expiresAt.getTime() - Date.now() : 0;
-      if (expiresAt && remainingMs > 120_000 && authData?.access_token) {
-        const currentAccess = await decryptFromB64(authData.access_token);
-        console.log('[ifood-auth/refresh] Returning cached token', { traceId, internalAccountId, remainingMs, wantedScope });
-        res.status(200).json({
-          access_token: currentAccess,
-          refresh_token: await decryptFromB64(authData.refresh_token),
-          expires_in: Math.floor(remainingMs / 1000),
-        });
-        return;
-      }
-    } catch {}
+    // Antes: se o token ainda estivesse válido por >120s, o código retornava o token em cache.
+    // Para o fluxo de conciliação on-demand, queremos forçar uma chamada real ao iFood
+    // em toda requisição de refresh, para garantir que o Supabase seja atualizado.
 
     if (!authData.refresh_token) {
       console.warn('[ifood-auth/refresh] Empty refresh token', { traceId, internalAccountId, wantedScope });
