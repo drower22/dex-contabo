@@ -212,6 +212,16 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
         headers,
         responseType: 'json',
       });
+      
+      console.log('[ifood-auth/exchange] 📥 Axios response details:', {
+        status: response.status,
+        statusText: response.statusText,
+        dataType: typeof response.data,
+        dataLength: JSON.stringify(response.data).length,
+        dataPreview: JSON.stringify(response.data).substring(0, 200),
+        headers: response.headers,
+      });
+      
       tokenData = response.data;
     } catch (error: any) { 
       if (axios.isAxiosError(error)) {
