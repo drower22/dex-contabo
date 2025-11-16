@@ -173,20 +173,40 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       // ignore preview errors
     }
 
-    const refreshToken = await decryptFromB64(authData.refresh_token);
-
+    let refreshToken: string;
     try {
+      console.log('[ifood-auth/refresh] 🔓 Attempting to decrypt refresh_token', {
+        traceId,
+        encryptedValue: authData.refresh_token,
+        encryptedLength: authData.refresh_token?.length,
+        hasEncryptionKey: !!process.env.ENCRYPTION_KEY,
+        encryptionKeyPreview: process.env.ENCRYPTION_KEY?.substring(0, 10) + '...',
+      });
+      
+      refreshToken = await decryptFromB64(authData.refresh_token);
+      
       const decryptedPreview = typeof refreshToken === 'string'
         ? `${refreshToken.substring(0, 16)}... len=${refreshToken.length}`
         : String(refreshToken);
-      console.log('[ifood-auth/refresh] 🔓 Supabase refresh_token (decrypted)', {
+      console.log('[ifood-auth/refresh] ✅ Supabase refresh_token (decrypted)', {
         traceId,
         internalAccountId,
         wantedScope,
         decryptedPreview,
       });
-    } catch {
-      // ignore preview errors
+    } catch (decryptError: any) {
+      console.error('[ifood-auth/refresh] ❌ Decryption FAILED', {
+        traceId,
+        error: decryptError.message,
+        stack: decryptError.stack,
+        encryptedValue: authData.refresh_token,
+      });
+      res.status(500).json({
+        error: 'Failed to decrypt refresh token',
+        details: decryptError.message,
+        traceId,
+      });
+      return;
     }
 
     // Usar apenas variáveis específicas por scope (sem fallback genérico)
