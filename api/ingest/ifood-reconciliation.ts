@@ -27,6 +27,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { decryptFromB64 } from '../_shared/crypto';
 import { randomUUID } from 'crypto';
 import zlib from 'zlib';
 
@@ -133,22 +134,77 @@ async function handlePost(req: VercelRequest, res: VercelResponse) {
       if (!res.headersSent) res.status(status).json({ error: message, traceId });
     };
 
+    let accessToken: string | null = null;
+    let tokenPreview: string | null = null;
+
     const refreshResp = await fetch(`${selfBase}/api/ifood-auth/refresh?scope=financial`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ storeId: merchantId }),
     });
     const tokenText = await refreshResp.text();
-    const tokenJson = parseJsonSafe<{ access_token?: string }>(tokenText);
-    if (!refreshResp.ok || !tokenJson?.access_token) {
-      await logToDb('error', 'auth', 'Falha ao obter token', { status: refreshResp.status, response: tokenText.slice(0, 200) });
-      await markError('refresh_failed', refreshResp.status || 500);
-      return;
+    const tokenJson = parseJsonSafe<{ access_token?: string; error?: string; message?: string }>(tokenText);
+
+    if (refreshResp.ok && tokenJson?.access_token) {
+      accessToken = tokenJson.access_token;
+      tokenPreview = `${accessToken.slice(0, 6)}...${accessToken.slice(-4)}`;
+      await logToDb('info', 'auth', 'Token obtido com sucesso via refresh', { tokenPreview });
+      console.info('[ifood-ingest] access_token_received', { traceId, tokenPreview });
+    } else {
+      // Fallback: se o refresh falhar especificamente por refresh inválido,
+      // mas ainda existir um access_token não expirado no Supabase, tentar usá-lo.
+      const status = refreshResp.status;
+      const errorCode = (tokenJson as any)?.error;
+      const errorMessage = (tokenJson as any)?.message || (tokenJson as any)?.details?.error?.message || '';
+
+      await logToDb('warn', 'auth', 'Refresh falhou, tentando fallback com access_token em cache', {
+        status,
+        errorCode,
+        errorMessage,
+        response: tokenText.slice(0, 200),
+      });
+
+      let cached: { access_token: string | null; expires_at: string | null } | null = null;
+      if (accountId) {
+        const { data: authData, error: authError } = await supabase
+          .from('ifood_store_auth')
+          .select('access_token, expires_at')
+          .eq('account_id', accountId)
+          .eq('scope', 'financial')
+          .maybeSingle();
+
+        if (authError) {
+          await logToDb('error', 'auth', 'Erro ao buscar token em cache', { error: authError.message, accountId });
+        } else {
+          cached = authData as any;
+        }
+      }
+
+      if (cached?.access_token && cached.expires_at) {
+        const expiresAt = new Date(cached.expires_at);
+        const remainingMs = expiresAt.getTime() - Date.now();
+        if (Number.isFinite(remainingMs) && remainingMs > 0) {
+          try {
+            const currentAccess = await decryptFromB64(cached.access_token);
+            accessToken = currentAccess;
+            tokenPreview = `${accessToken.slice(0, 6)}...${accessToken.slice(-4)}`;
+            await logToDb('info', 'auth', 'Usando access_token em cache (sem refresh)', {
+              tokenPreview,
+              remainingSeconds: Math.floor(remainingMs / 1000),
+            });
+            console.info('[ifood-ingest] using_cached_access_token', { traceId, tokenPreview });
+          } catch (e: any) {
+            await logToDb('error', 'auth', 'Falha ao descriptografar access_token em cache', { error: e?.message, accountId });
+          }
+        }
+      }
+
+      if (!accessToken) {
+        await logToDb('error', 'auth', 'Falha ao obter token (refresh e cache)', { status: refreshResp.status, response: tokenText.slice(0, 200) });
+        await markError('refresh_failed', refreshResp.status || 500);
+        return;
+      }
     }
-    const accessToken = tokenJson.access_token;
-    const tokenPreview = `${accessToken.slice(0, 6)}...${accessToken.slice(-4)}`;
-    await logToDb('info', 'auth', 'Token obtido com sucesso', { tokenPreview });
-    console.info('[ifood-ingest] access_token_received', { traceId, tokenPreview });
 
     await persistRun({ status: 'running', started_at: new Date().toISOString() });
 
