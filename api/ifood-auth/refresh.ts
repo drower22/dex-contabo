@@ -199,15 +199,50 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       });
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const data = error.response?.data as any;
         console.error('[ifood-auth/refresh] Axios error calling OAuth', {
           traceId,
-          status: error.response?.status,
-          data: error.response?.data,
+          status,
+          data,
           message: error.message,
         });
-        res.status(error.response?.status || 500).json({ 
-          error: 'Falha ao renovar token com iFood', 
-          details: error.response?.data 
+
+        // Tratar caso específico: refresh token inválido no iFood
+        const msg = data?.error?.message || data?.message || '';
+        if (status === 401 && typeof msg === 'string' && msg.includes('Invalid refresh token')) {
+          try {
+            await supabase
+              .from('ifood_store_auth')
+              .update({
+                access_token: null,
+                expires_at: null,
+                status: 'pending',
+              })
+              .eq('account_id', internalAccountId)
+              .eq('scope', wantedScope);
+          } catch (dbErr: any) {
+            console.error('[ifood-auth/refresh] Failed to mark token as pending after invalid refresh', {
+              traceId,
+              internalAccountId,
+              wantedScope,
+              error: dbErr?.message,
+            });
+          }
+
+          res.status(401).json({
+            error: 'refresh_invalid',
+            message: 'Refresh token inválido no iFood. É necessário refazer o vínculo (Gerar LinkCode + autorizar + Trocar Código).',
+            details: data,
+            traceId,
+          });
+          return;
+        }
+
+        res.status(status || 500).json({
+          error: 'Falha ao renovar token com iFood',
+          details: data,
+          traceId,
         });
         return;
       } else {
