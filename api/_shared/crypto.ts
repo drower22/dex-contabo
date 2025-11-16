@@ -72,7 +72,9 @@ export async function decryptFromB64(b64: string): Promise<string> {
     }
     
     const key = await importKey();
-    const bytes = new Uint8Array(Buffer.from(b64, 'base64'));
+    
+    // Use atob() like Supabase Edge Functions for compatibility
+    const bytes = Uint8Array.from(Buffer.from(b64, 'base64').toString('binary'), (c) => c.charCodeAt(0));
     
     if (bytes.length < 13) {
       throw new Error(`Invalid encrypted data: too short (${bytes.length} bytes, expected at least 13)`);
@@ -87,7 +89,8 @@ export async function decryptFromB64(b64: string): Promise<string> {
       error: e.message,
       hasKey: !!process.env.ENCRYPTION_KEY,
       inputLength: b64?.length,
-      inputPreview: b64?.substring(0, 20) + '...'
+      inputPreview: b64?.substring(0, 20) + '...',
+      stack: e.stack,
     });
     throw new Error(`Decryption failed: ${e.message}`);
   }
