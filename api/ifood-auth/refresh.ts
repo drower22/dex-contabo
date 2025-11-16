@@ -158,7 +158,36 @@ const refreshHandler = async (req: VercelRequest, res: VercelResponse): Promise<
       return;
     }
 
+    // 🔍 Log detalhado do token criptografado vindo do Supabase
+    try {
+      const encryptedPreview = typeof authData.refresh_token === 'string'
+        ? `${authData.refresh_token.substring(0, 16)}... len=${authData.refresh_token.length}`
+        : String(authData.refresh_token);
+      console.log('[ifood-auth/refresh] 🔐 Supabase refresh_token (encrypted)', {
+        traceId,
+        internalAccountId,
+        wantedScope,
+        encryptedPreview,
+      });
+    } catch {
+      // ignore preview errors
+    }
+
     const refreshToken = await decryptFromB64(authData.refresh_token);
+
+    try {
+      const decryptedPreview = typeof refreshToken === 'string'
+        ? `${refreshToken.substring(0, 16)}... len=${refreshToken.length}`
+        : String(refreshToken);
+      console.log('[ifood-auth/refresh] 🔓 Supabase refresh_token (decrypted)', {
+        traceId,
+        internalAccountId,
+        wantedScope,
+        decryptedPreview,
+      });
+    } catch {
+      // ignore preview errors
+    }
 
     // Usar apenas variáveis específicas por scope (sem fallback genérico)
     const clientId = scope === 'financial'

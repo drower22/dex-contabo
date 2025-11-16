@@ -17,7 +17,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { encryptToB64 } from '../_shared/crypto';
+import { encryptToB64, decryptFromB64 } from '../_shared/crypto';
 import { withCors } from '../_shared/cors';
 import { buildIFoodUrl, withIFoodProxy } from '../_shared/proxy';
 import axios from 'axios';
@@ -364,6 +364,39 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
     }
 
     console.log('[ifood-auth/exchange] ✅ Upsert successful:', savedData);
+
+    // 🔍 Diagnóstico: ler de volta o refresh_token salvo, descriptografar e comparar
+    try {
+      const { data: verifyRow } = await supabase
+        .from('ifood_store_auth')
+        .select('refresh_token')
+        .eq('account_id', resolvedAccountId)
+        .eq('scope', scope || 'reviews')
+        .maybeSingle();
+
+      if (verifyRow?.refresh_token) {
+        const decryptedRefresh = await decryptFromB64(verifyRow.refresh_token as string);
+        const same = decryptedRefresh === tokenData.refreshToken;
+        console.log('[ifood-auth/exchange] 🔍 Crypto verification for refresh_token:', {
+          accountId: resolvedAccountId,
+          scope,
+          originalPreview: String(tokenData.refreshToken).substring(0, 16) + '...',
+          decryptedPreview: decryptedRefresh.substring(0, 16) + '...',
+          originalLength: String(tokenData.refreshToken).length,
+          decryptedLength: decryptedRefresh.length,
+          equals: same,
+        });
+      } else {
+        console.warn('[ifood-auth/exchange] ⚠️ Crypto verification skipped: no refresh_token row found after upsert', {
+          accountId: resolvedAccountId,
+          scope,
+        });
+      }
+    } catch (verifyErr: any) {
+      console.error('[ifood-auth/exchange] ⚠️ Crypto verification error:', {
+        message: verifyErr?.message,
+      });
+    }
 
     // Após salvar os tokens, consolida o merchantId final e garante persistência nas duas tabelas
     const finalMerchantId = merchantId || storedMerchantId || existingMerchantId;
