@@ -235,12 +235,17 @@ const exchangeHandler = async (req: VercelRequest, res: VercelResponse): Promise
       }
     }
 
+    console.log('[ifood-auth/exchange] 📥 Raw tokenData (BEFORE normalization):', {
+      raw: tokenData,
+      type: typeof tokenData,
+      keys: Object.keys(tokenData || {}),
+      stringified: JSON.stringify(tokenData),
+    });
+
     // Remapeia campos para consistência (iFood retorna camelCase)
     tokenData.accessToken = tokenData.accessToken || tokenData.access_token;
     tokenData.refreshToken = tokenData.refreshToken || tokenData.refresh_token;
     tokenData.expiresIn = tokenData.expiresIn || tokenData.expires_in;
-
-    console.log('[ifood-auth/exchange] 📥 Raw tokenData:', tokenData);
 
     console.log('[ifood-auth/exchange] 📥 iFood response (normalized):', {
       hasAccessToken: !!tokenData.accessToken,
