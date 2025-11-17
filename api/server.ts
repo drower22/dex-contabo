@@ -125,6 +125,7 @@ const payoutsUnifiedHandler = loadHandler('./ifood/financial/payouts-unified');
 const reconciliationIngestHandler = loadHandler('./ifood/reconciliation/ingest');
 const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
 const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation/index');
+const salesHandler = loadHandler('./ifood/sales/index');
 
 // Proxy para iFood usando a função Vercel compartilhada
 app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
@@ -223,6 +224,16 @@ if (ifoodReconciliationHandler) {
 }
 
 // Cron de refresh de tokens agora é via GitHub Actions + Supabase
+
+// Rotas de Sales
+if (salesHandler) {
+  app.get('/api/ifood/sales', adaptVercelHandler(salesHandler));
+  console.log('✅ Sales handler loaded');
+} else {
+  app.get('/api/ifood/sales', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Sales handler not loaded' });
+  });
+}
 
 // 404 handler
 app.use((req: Request, res: Response) => {
