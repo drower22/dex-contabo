@@ -120,15 +120,11 @@ function loadHandler(modulePath: string) {
   }
 }
 
-// Carregar handlers financeiros
-const payoutsUnifiedHandler = loadHandler('./ifood-financial/payouts-unified');
-
-// Carregar handlers de conciliação
-const reconciliationHandler = loadHandler('./ingest/ifood-reconciliation');
-const reconciliationDebugHandler = loadHandler('./ingest/ifood-reconciliation-debug');
-
-// Carregar handlers de APIs diretas do iFood
-const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation');
+// Carregar handlers de APIs do iFood (reorganizados)
+const payoutsUnifiedHandler = loadHandler('./ifood/financial/payouts-unified');
+const reconciliationIngestHandler = loadHandler('./ifood/reconciliation/ingest');
+const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
+const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation/index');
 
 // Proxy para iFood usando a função Vercel compartilhada
 app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
@@ -202,13 +198,13 @@ if (payoutsUnifiedHandler) {
   });
 }
 
-// Rotas de conciliação
-if (reconciliationHandler) {
-  app.all('/api/ingest/ifood-reconciliation', adaptVercelHandler(reconciliationHandler));
-  console.log('✅ Reconciliation handler loaded');
+// Rotas de conciliação (ingest)
+if (reconciliationIngestHandler) {
+  app.all('/api/ingest/ifood-reconciliation', adaptVercelHandler(reconciliationIngestHandler));
+  console.log('✅ Reconciliation ingest handler loaded');
 } else {
   app.all('/api/ingest/ifood-reconciliation', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Reconciliation handler not loaded' });
+    res.status(500).json({ error: 'Reconciliation ingest handler not loaded' });
   });
 }
 

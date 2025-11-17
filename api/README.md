@@ -22,17 +22,48 @@ API backend para o projeto Dex, rodando no Contabo.
 
 ---
 
-## 📁 Estrutura
+## 📁 Estrutura (Reorganizada Nov 2025)
 
 ```
 api/
-├── _shared/          # Utilitários compartilhados (crypto, logger, ifood-client)
-├── ifood/            # Endpoints de dados iFood (reconciliation, settlements, reviews)
-├── ifood-financial/  # Endpoints financeiros (payouts-unified)
-├── ingest/           # Ingestão de dados (reconciliation)
-├── cron/             # Jobs agendados (health-check)
-├── ai/               # Endpoints de AI
-└── server.ts         # Servidor Express
+├── _shared/                    # Utilitários compartilhados
+│   ├── config.ts              # Configurações
+│   ├── crypto.ts              # Criptografia AES-GCM
+│   ├── logger.ts              # Logger básico
+│   ├── enhanced-logger.ts     # Logger avançado
+│   ├── ifood-client.ts        # Cliente HTTP iFood
+│   ├── cors.ts                # CORS helpers
+│   ├── discord.ts             # Notificações Discord
+│   ├── retry.ts               # Retry logic
+│   ├── proxy.ts               # Proxy helpers
+│   └── account-resolver.ts    # Resolver de contas
+│
+├── ifood/                      # Endpoints de dados iFood
+│   ├── financial/             # Financeiro
+│   │   ├── payouts.ts
+│   │   ├── payouts-unified.ts
+│   │   ├── settlements.ts
+│   │   └── anticipations.ts
+│   │
+│   ├── reviews/               # Avaliações
+│   │   ├── index.ts
+│   │   ├── summary.ts
+│   │   ├── settings.ts
+│   │   ├── [reviewId].ts
+│   │   └── [reviewId]/answers.ts
+│   │
+│   ├── reconciliation/        # Conciliação
+│   │   ├── index.ts          # Download de relatórios
+│   │   ├── ingest.ts         # Ingestão completa
+│   │   └── debug.ts          # Debug de ingestão
+│   │
+│   └── merchant.ts            # Info do merchant
+│
+├── ai/                         # Endpoints de AI
+│   ├── ai.handlers.ts
+│   └── reviews.ts
+│
+└── server.ts                   # Servidor Express
 ```
 
 ## 🛠️ Desenvolvimento
