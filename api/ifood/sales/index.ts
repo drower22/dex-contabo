@@ -95,7 +95,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       beginSalesDate,
       endSalesDate,
       page: pageNumber,
-      url: ifoodUrl
+      url: ifoodUrl,
+      tokenLength: token.length,
+      tokenStart: token.substring(0, 20) + '...'
     });
 
     // Chamar API do iFood
@@ -105,6 +107,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       }
+    });
+
+    console.log('[ifood-sales] iFood API response:', {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries())
     });
 
     if (!response.ok) {
