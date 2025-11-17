@@ -126,6 +126,7 @@ const reconciliationIngestHandler = loadHandler('./ifood/reconciliation/ingest')
 const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
 const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation/index');
 const salesHandler = loadHandler('./ifood/sales/index');
+const salesIngestHistoryHandler = loadHandler('./ifood/sales/ingest-history');
 
 // Proxy para iFood usando a função Vercel compartilhada
 app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
@@ -232,6 +233,16 @@ if (salesHandler) {
 } else {
   app.get('/api/ifood/sales', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Sales handler not loaded' });
+  });
+}
+
+// Rota de Ingestão Histórica de Sales
+if (salesIngestHistoryHandler) {
+  app.post('/api/ifood/sales/ingest-history', adaptVercelHandler(salesIngestHistoryHandler));
+  console.log('✅ Sales ingest-history handler loaded');
+} else {
+  app.post('/api/ifood/sales/ingest-history', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Sales ingest-history handler not loaded' });
   });
 }
 
