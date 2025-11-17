@@ -1,24 +1,41 @@
-# 🚀 API Node.js - DEX Parceiros iFood
+# 🚀 Dex Contabo API
 
-API backend para integração com iFood e gerenciamento de dados.
+API backend para o projeto Dex, rodando no Contabo.
 
-## 📋 Estrutura
+## ⚠️ IMPORTANTE: Arquitetura Atualizada (Nov 2025)
+
+### **Auth agora é 100% Supabase Edge Functions**
+
+- ✅ **Autenticação iFood** → Supabase Edge Functions
+  - `ifood-auth-link`
+  - `ifood-auth-exchange`
+  - `ifood-auth-refresh`
+  - `ifood-auth-refresh-all` (batch)
+  
+- ✅ **Refresh automático** → GitHub Actions (a cada hora)
+
+- ✅ **Contabo** → Apenas endpoints de **dados** do iFood:
+  - `/api/ifood/reconciliation`
+  - `/api/ifood/financial/payouts-unified`
+  - `/api/ingest/ifood-reconciliation`
+  - `/api/ifood-proxy`
+
+---
+
+## 📁 Estrutura
 
 ```
 api/
-├── ifood/                    # Endpoints iFood
-│   ├── merchant.ts          # Proxy merchant
-│   ├── reviews.ts           # Proxy reviews
-│   ├── settlements.ts       # Proxy settlements
-│   └── reconciliation.ts    # Proxy reconciliation
-├── ifood-auth/              # Autenticação iFood
-│   ├── refresh.ts           # Refresh token
-│   └── callback.ts          # OAuth callback
-├── ingest/                  # Ingestão de dados
-└── _shared/                 # Utilitários compartilhados
+├── _shared/          # Utilitários compartilhados (crypto, logger, ifood-client)
+├── ifood/            # Endpoints de dados iFood (reconciliation, settlements, reviews)
+├── ifood-financial/  # Endpoints financeiros (payouts-unified)
+├── ingest/           # Ingestão de dados (reconciliation)
+├── cron/             # Jobs agendados (health-check)
+├── ai/               # Endpoints de AI
+└── server.ts         # Servidor Express
 ```
 
-## 🔧 Configuração
+## 🛠️ Desenvolvimento
 
 ### Variáveis de Ambiente
 

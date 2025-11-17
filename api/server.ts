@@ -106,7 +106,7 @@ function adaptVercelHandler(handler: (req: any, res: any) => Promise<void>) {
 }
 
 // Carregar handlers TypeScript
-console.log('🔄 Loading iFood Auth TypeScript handlers...');
+console.log('🔄 Loading iFood API TypeScript handlers...');
 
 // Helper para carregar handler com fallback
 function loadHandler(modulePath: string) {
@@ -120,15 +120,6 @@ function loadHandler(modulePath: string) {
   }
 }
 
-// Carregar handlers de autenticação
-const healthHandler = loadHandler('./ifood-auth/health');
-const linkHandler = loadHandler('./ifood-auth/link');
-const linkSaveHandler = loadHandler('./ifood-auth/link.save');
-const exchangeHandler = loadHandler('./ifood-auth/exchange');
-const refreshHandler = loadHandler('./ifood-auth/refresh');
-const statusHandler = loadHandler('./ifood-auth/status');
-const debugEnvHandler = loadHandler('./ifood-auth/debug-env');
-
 // Carregar handlers financeiros
 const payoutsUnifiedHandler = loadHandler('./ifood-financial/payouts-unified');
 
@@ -138,9 +129,6 @@ const reconciliationDebugHandler = loadHandler('./ingest/ifood-reconciliation-de
 
 // Carregar handlers de APIs diretas do iFood
 const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation');
-
-// Carregar handlers de cron
-const refreshTokensCronHandler = loadHandler('./cron/refresh-tokens');
 
 // Proxy para iFood usando a função Vercel compartilhada
 app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
@@ -199,65 +187,10 @@ app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
   }
 });
 
-// Montar rotas
-if (healthHandler) {
-  app.get('/api/ifood-auth/health', adaptVercelHandler(healthHandler));
-  console.log('✅ Health handler loaded');
-} else {
-  app.get('/api/ifood-auth/health', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Health handler not loaded' });
-  });
-}
-
-if (linkHandler) {
-  app.post('/api/ifood-auth/link', adaptVercelHandler(linkHandler));
-  console.log('✅ Link handler loaded');
-} else {
-  app.post('/api/ifood-auth/link', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Link handler not loaded' });
-  });
-}
-
-if (linkSaveHandler) {
-  app.post('/api/ifood-auth/link/save', adaptVercelHandler(linkSaveHandler));
-  console.log('✅ Link save handler loaded');
-} else {
-  app.post('/api/ifood-auth/link/save', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Link save handler not loaded' });
-  });
-}
-
-if (exchangeHandler) {
-  app.post('/api/ifood-auth/exchange', adaptVercelHandler(exchangeHandler));
-  console.log('✅ Exchange handler loaded');
-} else {
-  app.post('/api/ifood-auth/exchange', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Exchange handler not loaded' });
-  });
-}
-
-if (refreshHandler) {
-  app.post('/api/ifood-auth/refresh', adaptVercelHandler(refreshHandler));
-  console.log('✅ Refresh handler loaded');
-} else {
-  app.post('/api/ifood-auth/refresh', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Refresh handler not loaded' });
-  });
-}
-
-if (statusHandler) {
-  app.get('/api/ifood-auth/status', adaptVercelHandler(statusHandler));
-  console.log('✅ Status handler loaded');
-} else {
-  app.get('/api/ifood-auth/status', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Status handler not loaded' });
-  });
-}
-
-if (debugEnvHandler) {
-  app.get('/api/ifood-auth/debug-env', adaptVercelHandler(debugEnvHandler));
-  console.log('✅ Debug env handler loaded');
-}
+// ============================================
+// ROTAS DE API DO IFOOD (Dados e Financeiro)
+// ============================================
+// Auth agora é 100% Supabase Edge Functions
 
 // Rotas financeiras
 if (payoutsUnifiedHandler) {
@@ -293,15 +226,7 @@ if (ifoodReconciliationHandler) {
   });
 }
 
-// Rotas de cron
-if (refreshTokensCronHandler) {
-  app.post('/api/cron/refresh-tokens', adaptVercelHandler(refreshTokensCronHandler));
-  console.log('✅ Refresh tokens cron handler loaded');
-} else {
-  app.post('/api/cron/refresh-tokens', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Refresh tokens cron handler not loaded' });
-  });
-}
+// Cron de refresh de tokens agora é via GitHub Actions + Supabase
 
 // 404 handler
 app.use((req: Request, res: Response) => {
