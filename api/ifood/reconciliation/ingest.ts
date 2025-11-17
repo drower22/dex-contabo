@@ -24,7 +24,6 @@ import { randomUUID } from 'crypto';
 import * as zlib from 'zlib';
 
 const IFOOD_BASE_URL = process.env.IFOOD_BASE_URL || 'https://merchant-api.ifood.com.br';
-const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const STORAGE_BUCKET = 'conciliacao';
 const MAX_POLL_ATTEMPTS = 24; // 24 tentativas x 5s = 2 minutos
 const POLL_INTERVAL_MS = 5000; // 5 segundos
@@ -39,11 +38,17 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export default async function handler(req: Request, res: Response) {
   const traceId = randomUUID();
   
+  // Criar cliente Supabase (dentro da função para garantir que env vars estejam carregadas)
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  
   console.log('[reconciliation-ingest] START', {
     traceId,
     method: req.method,
     body: req.body,
-    hasAuth: !!req.headers.authorization
+    hasSupabase: !!process.env.SUPABASE_URL
   });
 
   try {
