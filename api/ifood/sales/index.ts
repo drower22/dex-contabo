@@ -88,7 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Construir URL da API do iFood
     const pageNumber = page ? parseInt(page as string) : 1;
-    const ifoodUrl = `${IFOOD_BASE_URL}/financial/v1.0/sales?merchantId=${merchantId}&beginSalesDate=${beginSalesDate}&endSalesDate=${endSalesDate}&page=${pageNumber}`;
+    const ifoodUrl = `${IFOOD_BASE_URL}/financial/v3.0/merchants/${merchantId}/sales?beginSalesDate=${beginSalesDate}&endSalesDate=${endSalesDate}&page=${pageNumber}`;
 
     console.log('[ifood-sales] Calling iFood API:', {
       merchantId,
