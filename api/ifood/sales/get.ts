@@ -50,8 +50,6 @@ export async function salesGetHandler(req: Request, res: Response) {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'User-Agent': 'dex-api/1.0',
       }
     });
 
