@@ -37,6 +37,9 @@ jobs:
             git fetch --all
             git reset --hard origin/main
             
+            echo "🔧 Ajustando permissões..."
+            sudo chown -R dex:dex /home/dex/dex-app
+            
             echo "📦 Instalando dependências..."
             npm install
             
