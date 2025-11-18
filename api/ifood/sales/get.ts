@@ -17,6 +17,11 @@ const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY;   // deve bater com SHARED_
  */
 export async function salesGetHandler(req: Request, res: Response) {
   try {
+    console.log('[ifood-sales] handler ENTER', {
+      query: req.query,
+      headersHasAuth: !!req.headers.authorization,
+    });
+
     const { merchantId, beginSalesDate, endSalesDate, page } = req.query;
 
     // Validação
@@ -54,17 +59,19 @@ export async function salesGetHandler(req: Request, res: Response) {
     });
 
     let response: Response | any;
+    let upstreamUrlForLog = '';
 
     if (usingProxy) {
       // Usar proxydex como intermediário
       const proxyUrl = new URL(IFOOD_PROXY_BASE!);
       proxyUrl.searchParams.set('path', ifoodPath);
+      upstreamUrlForLog = proxyUrl.toString();
 
       console.log('[ifood-sales] Calling iFood via proxy:', {
-        proxyUrl: proxyUrl.toString()
+        proxyUrl: upstreamUrlForLog
       });
 
-      response = await fetch(proxyUrl.toString(), {
+      response = await fetch(upstreamUrlForLog, {
         method: 'GET',
         headers: {
           'x-shared-key': IFOOD_PROXY_KEY!,
@@ -75,9 +82,10 @@ export async function salesGetHandler(req: Request, res: Response) {
     } else {
       // Fallback: chamada direta para o iFood (comportamento original)
       const ifoodUrl = `${IFOOD_BASE_URL}${ifoodPath}`;
+      upstreamUrlForLog = ifoodUrl;
 
       console.log('[ifood-sales] Calling iFood API directly:', {
-        url: ifoodUrl
+        url: upstreamUrlForLog
       });
 
       response = await fetch(ifoodUrl, {
@@ -100,14 +108,15 @@ export async function salesGetHandler(req: Request, res: Response) {
       console.error('[ifood-sales] iFood API error:', {
         status: response.status,
         statusText: response.statusText,
-        body: errorText
+        body: errorText,
+        upstreamUrl: upstreamUrlForLog
       });
 
       return res.status(response.status).json({
         error: 'iFood API error',
         status: response.status,
         message: errorText,
-        url: ifoodUrl
+        url: upstreamUrlForLog
       });
     }
 
@@ -138,7 +147,11 @@ export async function salesGetHandler(req: Request, res: Response) {
     });
 
   } catch (error: any) {
-    console.error('[ifood-sales] Error:', error);
+    console.error('[ifood-sales] Error:', {
+      message: error?.message,
+      name: error?.name,
+      stack: error?.stack,
+    });
     return res.status(500).json({
       error: 'Internal server error',
       message: error.message
