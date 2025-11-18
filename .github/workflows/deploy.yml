@@ -37,11 +37,8 @@ jobs:
             git fetch --all
             git reset --hard origin/main
             
-            echo "🔧 Ajustando permissões..."
-            sudo chown -R dex:dex /home/dex/dex-app
-            
-            echo "📦 Instalando dependências..."
-            npm install
+            echo "📦 Instalando dependências (ignorando package-lock)..."
+            npm install --no-package-lock
             
             echo "🔄 Reiniciando PM2..."
             pm2 delete dex-api 2>/dev/null || true
