@@ -76,7 +76,9 @@ export async function salesGetHandler(req: Request, res: Response) {
         headers: {
           'x-shared-key': IFOOD_PROXY_KEY!,
           'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          // tentar evitar compressão/gzip para simplificar consumo
+          'accept-encoding': 'identity',
         }
       });
     } else {
@@ -120,7 +122,18 @@ export async function salesGetHandler(req: Request, res: Response) {
       });
     }
 
-    const data = await response.json() as any;
+    const rawText = await response.text();
+    let data: any;
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch (parseErr: any) {
+      console.error('[ifood-sales] JSON parse error from upstream:', {
+        message: parseErr?.message,
+        upstreamUrl: upstreamUrlForLog,
+        rawSample: rawText.substring(0, 500),
+      });
+      throw parseErr;
+    }
 
     console.log('[ifood-sales] Success:', {
       merchantId,
