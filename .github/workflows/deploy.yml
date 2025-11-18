@@ -37,7 +37,10 @@ jobs:
             git fetch --all
             git reset --hard origin/main
             
-            echo "📦 Instalando dependências (ignorando package-lock)..."
+            echo "🧹 Limpando node_modules..."
+            rm -rf node_modules
+            
+            echo "📦 Instalando dependências..."
             npm install --no-package-lock
             
             echo "🔄 Reiniciando PM2..."
