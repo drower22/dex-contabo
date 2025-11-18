@@ -9,24 +9,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (metadata only)
-        uses: actions/checkout@v4
-
-      - name: SSH ping (debug)
+      - name: Deploy to Contabo
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: 22
-          script: |
-            echo "SSH OK on $(hostname)"
-
-      - name: Remote deploy (Node + PM2 + TypeScript)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: dex
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: 22
           script: |
@@ -37,20 +24,11 @@ jobs:
             git fetch --all
             git reset --hard origin/main
             
-            echo "🧹 Limpando node_modules..."
-            rm -rf node_modules
+            echo "📦 Verificando dependências..."
+            npm ci --prefer-offline --no-audit 2>/dev/null || npm install --prefer-offline --no-audit
             
-            echo "📦 Instalando dependências..."
-            npm install --no-package-lock
-            
-            echo "🔄 Reiniciando PM2..."
-            pm2 delete dex-api 2>/dev/null || true
-            pm2 start api/server.ts \
-              --name dex-api \
-              --interpreter tsx \
-              --instances 1 \
-              --env production
-            pm2 save
+            echo "🔄 Reiniciando serviços PM2..."
+            pm2 restart ecosystem.config.js --update-env
             
             echo "✅ Deploy concluído!"
             pm2 status
