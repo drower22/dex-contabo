@@ -127,6 +127,7 @@ const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
 const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation/index');
 const salesHandler = loadHandler('./ifood/sales/index');
 const salesIngestHistoryHandler = loadHandler('./ifood/sales/ingest-history');
+const salesSyncHandler = loadHandler('./ifood/sales/sync');
 
 // Proxy para iFood usando a função Vercel compartilhada
 app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
@@ -243,6 +244,20 @@ if (salesIngestHistoryHandler) {
 } else {
   app.post('/api/ifood/sales/ingest-history', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Sales ingest-history handler not loaded' });
+  });
+}
+
+// Rotas de Sync de Vendas (Sistema de Filas)
+if (salesSyncHandler) {
+  app.post('/api/ifood/sales/sync', salesSyncHandler.syncIfoodSales);
+  app.get('/api/ifood/sales/sync/:jobId', salesSyncHandler.getSyncJobStatus);
+  console.log('✅ Sales sync handler loaded');
+} else {
+  app.post('/api/ifood/sales/sync', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Sales sync handler not loaded' });
+  });
+  app.get('/api/ifood/sales/sync/:jobId', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Sales sync handler not loaded' });
   });
 }
 
