@@ -131,6 +131,10 @@ const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation/index');
 const salesHandler = loadHandler('./ifood/sales/index');
 const salesIngestHistoryHandler = loadHandler('./ifood/sales/ingest-history');
 const salesSyncHandler = loadHandler('./ifood/sales/sync');
+console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
+if (salesSyncHandler) {
+  console.log('🔍 DEBUG exports:', Object.keys(salesSyncHandler));
+}
 
 // Proxy para iFood usando a função Vercel compartilhada
 app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
