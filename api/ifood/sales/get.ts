@@ -123,6 +123,11 @@ export async function salesGetHandler(req: Request, res: Response) {
     }
 
     const rawText = await response.text();
+    console.log('[ifood-sales] Raw response from proxy:', {
+      length: rawText.length,
+      sample: rawText.substring(0, 500)
+    });
+    
     let data: any;
     try {
       data = rawText ? JSON.parse(rawText) : {};
