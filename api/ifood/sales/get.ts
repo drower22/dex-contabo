@@ -7,6 +7,10 @@ import type { Request, Response } from 'express';
 
 const IFOOD_BASE_URL = process.env.IFOOD_BASE_URL || 'https://merchant-api.ifood.com.br';
 
+// Configuração opcional de proxy (proxydex em Vercel)
+const IFOOD_PROXY_BASE = process.env.IFOOD_PROXY_BASE; // ex: https://proxy.usa-dex.com.br/api/ifood-proxy
+const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY;   // deve bater com SHARED_PROXY_KEY no proxydex
+
 /**
  * Handler para buscar vendas
  * GET /api/ifood/sales?merchantId=xxx&beginSalesDate=xxx&endSalesDate=xxx&page=1
@@ -30,28 +34,60 @@ export async function salesGetHandler(req: Request, res: Response) {
 
     const token = authHeader.toString().replace('Bearer ', '').trim();
 
-    // Construir URL da API do iFood
+    // Construir caminho da API do iFood (sem host) - será usado tanto direto quanto via proxy
     const pageNumber = page ? parseInt(page as string) : 1;
-    const ifoodUrl = `${IFOOD_BASE_URL}/financial/v3.0/merchants/${merchantId}/sales?beginSalesDate=${beginSalesDate}&endSalesDate=${endSalesDate}&page=${pageNumber}`;
+    const ifoodPath = `/financial/v3.0/merchants/${merchantId}/sales?beginSalesDate=${beginSalesDate}&endSalesDate=${endSalesDate}&page=${pageNumber}`;
 
-    console.log('[ifood-sales] Calling iFood API:', {
+    const usingProxy = !!IFOOD_PROXY_BASE && !!IFOOD_PROXY_KEY;
+
+    console.log('[ifood-sales] Preparing request to iFood:', {
       merchantId,
       beginSalesDate,
       endSalesDate,
       page: pageNumber,
-      url: ifoodUrl,
+      ifoodPath,
+      usingProxy,
+      proxyBase: IFOOD_PROXY_BASE,
+      hasProxyKey: !!IFOOD_PROXY_KEY,
       tokenLength: token.length,
       tokenStart: token.substring(0, 20) + '...'
     });
 
-    // Chamar API do iFood
-    const response = await fetch(ifoodUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      }
-    });
+    let response: Response | any;
+
+    if (usingProxy) {
+      // Usar proxydex como intermediário
+      const proxyUrl = new URL(IFOOD_PROXY_BASE!);
+      proxyUrl.searchParams.set('path', ifoodPath);
+
+      console.log('[ifood-sales] Calling iFood via proxy:', {
+        proxyUrl: proxyUrl.toString()
+      });
+
+      response = await fetch(proxyUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'x-shared-key': IFOOD_PROXY_KEY!,
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json'
+        }
+      });
+    } else {
+      // Fallback: chamada direta para o iFood (comportamento original)
+      const ifoodUrl = `${IFOOD_BASE_URL}${ifoodPath}`;
+
+      console.log('[ifood-sales] Calling iFood API directly:', {
+        url: ifoodUrl
+      });
+
+      response = await fetch(ifoodUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+    }
 
     console.log('[ifood-sales] iFood API response:', {
       status: response.status,
