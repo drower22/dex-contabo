@@ -76,9 +76,7 @@ export async function salesGetHandler(req: Request, res: Response) {
         headers: {
           'x-shared-key': IFOOD_PROXY_KEY!,
           'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json',
-          // tentar evitar compressão/gzip para simplificar consumo
-          'accept-encoding': 'identity',
+          'Accept': 'application/json'
         }
       });
     } else {
