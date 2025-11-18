@@ -3,6 +3,9 @@
  * @description Servidor Express TypeScript para rodar APIs do Contabo
  * Carrega handlers TypeScript diretamente usando ts-node
  */
+// Registrar ts-node para permitir require() de arquivos .ts
+require('ts-node/register');
+
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
