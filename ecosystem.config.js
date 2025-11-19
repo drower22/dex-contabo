@@ -62,6 +62,17 @@ module.exports = {
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
+        // Supabase
+        SUPABASE_URL: process.env.SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        SUPABASE_KEY: process.env.SUPABASE_KEY,
+        // Redis
+        REDIS_HOST: process.env.REDIS_HOST || 'localhost',
+        REDIS_PORT: process.env.REDIS_PORT || '6379',
+        // iFood Proxy
+        IFOOD_PROXY_BASE: process.env.IFOOD_PROXY_BASE,
+        IFOOD_PROXY_KEY: process.env.IFOOD_PROXY_KEY,
+        SHARED_PROXY_KEY: process.env.SHARED_PROXY_KEY,
       },
       error_file: './logs/worker-error.log',
       out_file: './logs/worker-out.log',
