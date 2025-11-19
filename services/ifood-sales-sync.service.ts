@@ -67,7 +67,7 @@ export async function fetchIfoodSales(
   endDate: string,
   page: number = 1
 ): Promise<{ sales: any[]; hasMore: boolean }> {
-  const url = `${IFOOD_PROXY_BASE}?path=/financial/v1.0/merchants/${merchantId}/sales&beginSalesDate=${beginDate}&endSalesDate=${endDate}&page=${page}`;
+  const url = `${IFOOD_PROXY_BASE}?path=/financial/v3.0/merchants/${merchantId}/sales?beginSalesDate=${beginDate}&endSalesDate=${endDate}&page=${page}`;
 
   const response = await fetch(url, {
     method: 'GET',
@@ -87,10 +87,16 @@ export async function fetchIfoodSales(
   }
 
   const data = await response.json();
-  const sales = data.data?.sales || [];
+  const sales = data.sales || [];
+  const currentPage = data.page || page;
+  const size = data.size || sales.length;
   
-  // Se retornou menos vendas que o tamanho da página, não há mais páginas
-  const hasMore = sales.length >= 3; // iFood retorna 3 por página
+  // Calcular se há mais páginas baseado no total de vendas e página atual
+  // Se a página atual * tamanho < total de vendas retornadas, há mais páginas
+  // Mas como não temos total, vamos assumir que se retornou vendas = size, pode ter mais
+  const hasMore = sales.length === size && sales.length > 0;
+
+  console.log(`📄 [fetchIfoodSales] Página ${currentPage}: ${sales.length} vendas, hasMore: ${hasMore}`);
 
   return { sales, hasMore };
 }
