@@ -8,6 +8,8 @@ import type { SyncJobData } from '../../../types/ifood-sales-sync.types';
  */
 export async function syncIfoodSales(req: Request, res: Response) {
   try {
+    console.log('🔍 [API] POST /api/ifood/sales/sync - Body recebido:', JSON.stringify(req.body, null, 2));
+    
     const {
       accountId,
       merchantId,
@@ -16,8 +18,11 @@ export async function syncIfoodSales(req: Request, res: Response) {
       syncType = 'backfill',
     } = req.body;
 
+    console.log('🔍 [API] Parâmetros extraídos:', { accountId, merchantId, periodStart, periodEnd, syncType });
+
     // Validações
     if (!accountId || !merchantId || !periodStart || !periodEnd) {
+      console.error('❌ [API] Validação falhou - parâmetros faltando');
       return res.status(400).json({
         error: 'Parâmetros obrigatórios: accountId, merchantId, periodStart, periodEnd',
       });
