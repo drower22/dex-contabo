@@ -8,7 +8,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 const IFOOD_PROXY_BASE = process.env.IFOOD_PROXY_BASE || 'https://proxy.usa-dex.com.br/api/ifood-proxy';
-const IFOOD_PROXY_KEY = process.env.SHARED_PROXY_KEY!;
+const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY || process.env.SHARED_PROXY_KEY!;
 
 /**
  * Cria ou atualiza registro de sync status
