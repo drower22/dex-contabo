@@ -43,8 +43,10 @@ async function processSyncJob(job: Job<SyncJobData>) {
     });
 
     // 3. Obter token do iFood
-    console.log(`🔑 Obtendo token para account ${accountId}...`);
+    console.log(`🔑 [Worker] Obtendo token para account ${accountId}...`);
+    console.log(`🔍 [Worker] Job data:`, { accountId, merchantId, periodStart, periodEnd });
     const token = await getIfoodToken(accountId);
+    console.log(`✅ [Worker] Token obtido com sucesso (length: ${token?.length || 0})`);
 
     // 4. Buscar vendas página por página
     let currentPage = 1;

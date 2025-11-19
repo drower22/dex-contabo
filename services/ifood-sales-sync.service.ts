@@ -218,19 +218,32 @@ export async function logToSupabase(
 /**
  * Busca token do iFood do Supabase
  */
-export async function getIfoodToken(storeId: string): Promise<string> {
+export async function getIfoodToken(accountId: string): Promise<string> {
+  console.log('🔍 [getIfoodToken] Buscando token para accountId:', accountId);
+  
   const { data, error } = await supabase
     .from('ifood_store_auth')
-    .select('access_token')
-    .eq('account_id', storeId)
+    .select('account_id, access_token, scope, status, expires_at')
+    .eq('account_id', accountId)
     .eq('scope', 'financial')
     .eq('status', 'connected')
     .single();
 
+  console.log('🔍 [getIfoodToken] Query result:', { 
+    found: !!data, 
+    error: error?.message,
+    accountId: data?.account_id,
+    hasToken: !!data?.access_token,
+    scope: data?.scope,
+    status: data?.status
+  });
+
   if (error || !data?.access_token) {
-    console.error('Erro ao buscar token:', error);
+    console.error('❌ [getIfoodToken] Erro ao buscar token:', error);
+    console.error('❌ [getIfoodToken] Data recebida:', data);
     throw new Error('Erro ao obter token do iFood');
   }
 
+  console.log('✅ [getIfoodToken] Token encontrado com sucesso');
   return data.access_token;
 }
