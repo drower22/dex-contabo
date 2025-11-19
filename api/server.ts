@@ -254,17 +254,17 @@ if (salesIngestHistoryHandler) {
   });
 }
 
-// Rotas de Sync de Vendas (Sistema de Filas)
+// Rotas de Sync de Vendas (Sync Direto - sem worker)
 if (salesSyncHandler) {
   app.post('/api/ifood/sales/sync', salesSyncHandler.syncIfoodSales);
-  app.get('/api/ifood/sales/sync/:jobId', salesSyncHandler.getSyncJobStatus);
-  console.log('✅ Sales sync handler loaded');
+  app.get('/api/ifood/sales/sync/:jobId', salesSyncHandler.syncIfoodSales); // Redireciona GET para o mesmo handler
+  console.log('✅ Sales sync handler loaded (direct sync)');
 } else {
   app.post('/api/ifood/sales/sync', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Sales sync handler not loaded' });
   });
   app.get('/api/ifood/sales/sync/:jobId', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Sales sync handler not loaded' });
+    res.status(200).json({ message: 'Worker desabilitado. Use POST para sync direto.' });
   });
 }
 
