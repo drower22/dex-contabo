@@ -252,40 +252,40 @@ export async function logToSupabase(
 }
 
 /**
- * Busca token do iFood do Supabase
+ * Busca token do iFood do Supabase via Edge Function (descriptografa)
  */
 export async function getIfoodToken(accountId: string): Promise<string> {
-  console.log('🔍 [getIfoodToken] Buscando token para accountId:', accountId);
+  console.log('🔍 [getIfoodToken] Buscando token descriptografado para accountId:', accountId);
   
-  const { data, error } = await supabase
-    .from('ifood_store_auth')
-    .select('account_id, access_token, scope, status, expires_at')
-    .eq('account_id', accountId)
-    .eq('scope', 'financial')
-    .eq('status', 'connected')
-    .single();
+  try {
+    // Chama a Edge Function que descriptografa o token
+    const { data, error } = await supabase.functions.invoke('ifood-get-token', {
+      body: {
+        storeId: accountId,
+        scope: 'financial'
+      }
+    });
 
-  console.log('🔍 [getIfoodToken] Query result:', { 
-    found: !!data, 
-    error: error?.message,
-    accountId: data?.account_id,
-    hasToken: !!data?.access_token,
-    tokenLength: data?.access_token?.length || 0,
-    tokenPrefix: data?.access_token?.substring(0, 20) + '...',
-    tokenSuffix: '...' + data?.access_token?.substring(data?.access_token?.length - 10),
-    scope: data?.scope,
-    status: data?.status,
-    expiresAt: data?.expires_at
-  });
+    console.log('🔍 [getIfoodToken] Edge Function response:', { 
+      success: !!data,
+      error: error?.message,
+      hasAccessToken: !!data?.access_token,
+      tokenLength: data?.access_token?.length || 0,
+      tokenPrefix: data?.access_token?.substring(0, 20) + '...',
+      expiresInMinutes: data?.expires_in_minutes
+    });
 
-  if (error || !data?.access_token) {
-    console.error('❌ [getIfoodToken] Erro ao buscar token:', error);
-    console.error('❌ [getIfoodToken] Data recebida:', data);
-    throw new Error('Erro ao obter token do iFood');
+    if (error || !data?.access_token) {
+      console.error('❌ [getIfoodToken] Erro ao chamar Edge Function:', error);
+      throw new Error('Erro ao obter token do iFood via Edge Function');
+    }
+
+    console.log('✅ [getIfoodToken] Token descriptografado obtido com sucesso');
+    console.log('🔑 [getIfoodToken] Token type:', data.access_token.startsWith('eyJ') ? 'JWT válido ✅' : 'Token inválido ❌');
+    
+    return data.access_token;
+  } catch (err) {
+    console.error('❌ [getIfoodToken] Exceção:', err);
+    throw err;
   }
-
-  console.log('✅ [getIfoodToken] Token encontrado com sucesso');
-  console.log('🔑 [getIfoodToken] Token type:', data.access_token.startsWith('eyJ') ? 'JWT válido' : 'Token inválido (não é JWT)');
-  
-  return data.access_token;
 }
