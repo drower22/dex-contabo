@@ -46,6 +46,8 @@ async function fetchSalesPage(
   const url = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(path)}`;
 
   console.log(`📄 [syncIfoodSales] Buscando página ${page}...`);
+  console.log(`📄 [syncIfoodSales] URL completa:`, url);
+  console.log(`📄 [syncIfoodSales] Path iFood:`, path);
 
   const response = await fetch(url, {
     method: 'GET',
@@ -56,8 +58,12 @@ async function fetchSalesPage(
     }
   });
 
+  console.log(`📥 [syncIfoodSales] Response status:`, response.status, response.statusText);
+
   if (!response.ok) {
     if (response.status === 400) {
+      const errorText = await response.text();
+      console.warn(`⚠️ [syncIfoodSales] Status 400 na página ${page}:`, errorText);
       // Fim das páginas
       return { sales: [], hasMore: false };
     }
@@ -67,10 +73,18 @@ async function fetchSalesPage(
   }
 
   const data: any = await response.json();
+  console.log(`📊 [syncIfoodSales] Dados recebidos:`, {
+    page: data.page,
+    size: data.size,
+    salesCount: data.sales?.length || 0,
+    hasMorePages: data.hasMore,
+    sampleSale: data.sales?.[0] ? { id: data.sales[0].id, createdAt: data.sales[0].createdAt } : null
+  });
+  
   const sales = data.sales || [];
   const hasMore = sales.length > 0 && sales.length === (data.size || 20);
 
-  console.log(`✅ [syncIfoodSales] Página ${page}: ${sales.length} vendas`);
+  console.log(`✅ [syncIfoodSales] Página ${page}: ${sales.length} vendas | hasMore: ${hasMore}`);
   return { sales, hasMore };
 }
 
@@ -201,37 +215,69 @@ export async function syncIfoodSales(req: Request, res: Response) {
       // 1. Obter token
       const token = await getIfoodToken(accountId);
 
-      // 2. Buscar todas as páginas
-      let page = 1;
+      // 2. Dividir período em chunks de 7 dias (limite da API iFood)
+      const startDate = new Date(periodStart);
+      const endDate = new Date(periodEnd);
+      const chunks: Array<{ start: string; end: string }> = [];
+      
+      let currentStart = new Date(startDate);
+      while (currentStart <= endDate) {
+        const currentEnd = new Date(currentStart);
+        currentEnd.setDate(currentEnd.getDate() + 6); // 7 dias (incluindo o dia inicial)
+        
+        if (currentEnd > endDate) {
+          currentEnd.setTime(endDate.getTime());
+        }
+        
+        chunks.push({
+          start: currentStart.toISOString().split('T')[0],
+          end: currentEnd.toISOString().split('T')[0]
+        });
+        
+        currentStart.setDate(currentStart.getDate() + 7);
+      }
+
+      console.log(`📅 [API] Período dividido em ${chunks.length} chunks de 7 dias:`, chunks);
+
+      // 3. Buscar vendas de cada chunk
       let allSales: any[] = [];
-      let hasMore = true;
+      let totalPages = 0;
 
-      while (hasMore) {
-        const { sales, hasMore: more } = await fetchSalesPage(
-          token, merchantId, periodStart, periodEnd, page
-        );
-        allSales.push(...sales);
-        hasMore = more;
-        page++;
+      for (const chunk of chunks) {
+        console.log(`📦 [API] Processando chunk: ${chunk.start} a ${chunk.end}`);
+        
+        let page = 1;
+        let hasMore = true;
 
-        // Limite de segurança (max 100 páginas)
-        if (page > 100) {
-          console.warn('⚠️ [syncIfoodSales] Limite de 100 páginas atingido');
-          break;
+        while (hasMore) {
+          const { sales, hasMore: more } = await fetchSalesPage(
+            token, merchantId, chunk.start, chunk.end, page
+          );
+          allSales.push(...sales);
+          hasMore = more;
+          page++;
+          totalPages++;
+
+          // Limite de segurança (max 100 páginas por chunk)
+          if (page > 100) {
+            console.warn(`⚠️ [syncIfoodSales] Limite de 100 páginas atingido no chunk ${chunk.start}-${chunk.end}`);
+            break;
+          }
         }
       }
 
-      // 3. Salvar no banco
+      // 4. Salvar no banco
       const savedCount = await saveSales(allSales, accountId, merchantId);
 
-      console.log(`✅ [API] Sync concluído: ${savedCount} vendas sincronizadas`);
+      console.log(`✅ [API] Sync concluído: ${savedCount} vendas sincronizadas em ${chunks.length} chunks`);
 
       return res.status(200).json({
         success: true,
         message: 'Sincronização concluída',
         data: {
           salesSynced: savedCount,
-          totalPages: page - 1,
+          totalPages,
+          totalChunks: chunks.length,
           periodStart,
           periodEnd,
         },
