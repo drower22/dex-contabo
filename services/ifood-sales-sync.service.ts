@@ -69,16 +69,46 @@ export async function fetchIfoodSales(
 ): Promise<{ sales: any[]; hasMore: boolean }> {
   const url = `${IFOOD_PROXY_BASE}?path=/financial/v3.0/merchants/${merchantId}/sales?beginSalesDate=${beginDate}&endSalesDate=${endDate}&page=${page}`;
 
+  console.log('🌐 [fetchIfoodSales] Preparando requisição:', {
+    url,
+    proxyBase: IFOOD_PROXY_BASE,
+    proxyKeyLength: IFOOD_PROXY_KEY?.length || 0,
+    tokenLength: token?.length || 0,
+    tokenPrefix: token?.substring(0, 20) + '...',
+    merchantId,
+    beginDate,
+    endDate,
+    page
+  });
+
+  const headers = {
+    'x-shared-key': IFOOD_PROXY_KEY,
+    'Authorization': `Bearer ${token}`,
+    'Accept': 'application/json',
+  };
+
+  console.log('📋 [fetchIfoodSales] Headers:', {
+    'x-shared-key': IFOOD_PROXY_KEY?.substring(0, 5) + '...' + IFOOD_PROXY_KEY?.substring(IFOOD_PROXY_KEY.length - 3),
+    'Authorization': 'Bearer ' + token?.substring(0, 20) + '...',
+    'Accept': 'application/json'
+  });
+
   const response = await fetch(url, {
     method: 'GET',
-    headers: {
-      'x-shared-key': IFOOD_PROXY_KEY,
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json',
-    },
+    headers,
+  });
+
+  console.log('📥 [fetchIfoodSales] Response:', {
+    status: response.status,
+    statusText: response.statusText,
+    ok: response.ok,
+    headers: Object.fromEntries(response.headers.entries())
   });
 
   if (!response.ok) {
+    const errorBody = await response.text();
+    console.error('❌ [fetchIfoodSales] Error body:', errorBody);
+    
     if (response.status === 400) {
       // Fim das páginas
       return { sales: [], hasMore: false };
@@ -240,8 +270,12 @@ export async function getIfoodToken(accountId: string): Promise<string> {
     error: error?.message,
     accountId: data?.account_id,
     hasToken: !!data?.access_token,
+    tokenLength: data?.access_token?.length || 0,
+    tokenPrefix: data?.access_token?.substring(0, 20) + '...',
+    tokenSuffix: '...' + data?.access_token?.substring(data?.access_token?.length - 10),
     scope: data?.scope,
-    status: data?.status
+    status: data?.status,
+    expiresAt: data?.expires_at
   });
 
   if (error || !data?.access_token) {
@@ -251,5 +285,7 @@ export async function getIfoodToken(accountId: string): Promise<string> {
   }
 
   console.log('✅ [getIfoodToken] Token encontrado com sucesso');
+  console.log('🔑 [getIfoodToken] Token type:', data.access_token.startsWith('eyJ') ? 'JWT válido' : 'Token inválido (não é JWT)');
+  
   return data.access_token;
 }
