@@ -187,8 +187,9 @@ export async function saveSalesToSupabase(sales: any[], accountId: string): Prom
     .upsert(transformedSales, {
       onConflict: 'id',
       ignoreDuplicates: false, // Atualizar se já existir
+      count: 'exact'
     })
-    .select('id', { count: 'exact' });
+    .select('id');
 
   if (error) {
     throw new Error(`Erro ao salvar vendas: ${error.message}`);
@@ -218,15 +219,16 @@ export async function logToSupabase(
  * Busca token do iFood do Supabase
  */
 export async function getIfoodToken(storeId: string): Promise<string> {
-  // Chama a edge function para obter o token
-  const { data, error } = await supabase.functions.invoke('ifood-get-token', {
-    body: {
-      accountId: storeId,
-      scope: 'financial',
-    },
-  });
+  const { data, error } = await supabase
+    .from('ifood_store_auth')
+    .select('access_token')
+    .eq('account_id', storeId)
+    .eq('scope', 'financial')
+    .eq('status', 'connected')
+    .single();
 
   if (error || !data?.access_token) {
+    console.error('Erro ao buscar token:', error);
     throw new Error('Erro ao obter token do iFood');
   }
 
