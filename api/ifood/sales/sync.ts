@@ -11,16 +11,15 @@ export async function syncIfoodSales(req: Request, res: Response) {
     const {
       accountId,
       merchantId,
-      storeId,
       periodStart,
       periodEnd,
       syncType = 'backfill',
     } = req.body;
 
     // Validações
-    if (!accountId || !merchantId || !storeId || !periodStart || !periodEnd) {
+    if (!accountId || !merchantId || !periodStart || !periodEnd) {
       return res.status(400).json({
-        error: 'Parâmetros obrigatórios: accountId, merchantId, storeId, periodStart, periodEnd',
+        error: 'Parâmetros obrigatórios: accountId, merchantId, periodStart, periodEnd',
       });
     }
 
@@ -36,7 +35,6 @@ export async function syncIfoodSales(req: Request, res: Response) {
     const jobData: SyncJobData = {
       accountId,
       merchantId,
-      storeId,
       periodStart,
       periodEnd,
       syncType,

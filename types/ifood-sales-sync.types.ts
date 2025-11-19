@@ -3,7 +3,6 @@
 export interface SyncJobData {
   accountId: string;
   merchantId: string;
-  storeId: string;
   periodStart: string; // YYYY-MM-DD
   periodEnd: string;   // YYYY-MM-DD
   syncType: 'backfill' | 'daily';

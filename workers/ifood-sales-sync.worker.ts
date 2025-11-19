@@ -15,12 +15,18 @@ import {
  * Processa um job de sync de vendas
  */
 async function processSyncJob(job: Job<SyncJobData>) {
-  const { accountId, merchantId, storeId, periodStart, periodEnd, syncType } = job.data;
+  const { accountId, merchantId, periodStart, periodEnd, syncType } = job.data;
 
   console.log(`🚀 Iniciando sync: ${accountId} - ${merchantId} (${periodStart} a ${periodEnd})`);
 
   // 1. Criar registro de sync status
-  const syncId = await createSyncStatus(job.data);
+  const syncId = await createSyncStatus({
+    accountId,
+    merchantId,
+    periodStart,
+    periodEnd,
+    syncType,
+  });
 
   try {
     // 2. Atualizar status para "running"
@@ -37,8 +43,8 @@ async function processSyncJob(job: Job<SyncJobData>) {
     });
 
     // 3. Obter token do iFood
-    console.log(`🔑 Obtendo token para store ${storeId}...`);
-    const token = await getIfoodToken(storeId);
+    console.log(`🔑 Obtendo token para account ${accountId}...`);
+    const token = await getIfoodToken(accountId);
 
     // 4. Buscar vendas página por página
     let currentPage = 1;
