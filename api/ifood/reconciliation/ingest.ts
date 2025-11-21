@@ -39,18 +39,67 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
  */
 export default async function handler(req: Request, res: Response) {
   const traceId = randomUUID();
-  
+
   // Criar cliente Supabase (dentro da função para garantir que env vars estejam carregadas)
   const supabase = createClient(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
-  
+
+  let runId: string | null = null;
+
+  const logToDb = async (
+    level: 'debug' | 'info' | 'warn' | 'error',
+    step: string,
+    message: string,
+    metadata?: any,
+  ) => {
+    try {
+      await supabase.from('ifood_conciliation_logs').insert({
+        run_id: runId,
+        trace_id: traceId,
+        level,
+        step,
+        message,
+        metadata: metadata ? JSON.parse(JSON.stringify(metadata)) : null,
+      });
+    } catch (err: any) {
+      console.error('[reconciliation-ingest] log_insert_failed', {
+        traceId,
+        step,
+        error: err?.message,
+      });
+    }
+  };
+
+  const persistRun = async (patch: Record<string, any>) => {
+    if (!runId) return;
+    try {
+      const { error } = await supabase
+        .from('ifood_conciliation_runs')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('id', runId);
+      if (error) {
+        console.error('[reconciliation-ingest] run_update_failed', {
+          traceId,
+          runId,
+          error: error.message,
+        });
+      }
+    } catch (err: any) {
+      console.error('[reconciliation-ingest] run_update_exception', {
+        traceId,
+        runId,
+        error: err?.message,
+      });
+    }
+  };
+
   console.log('[reconciliation-ingest] START', {
     traceId,
     method: req.method,
     body: req.body,
-    hasSupabase: !!process.env.SUPABASE_URL
+    hasSupabase: !!process.env.SUPABASE_URL,
   });
 
   try {
@@ -63,9 +112,86 @@ export default async function handler(req: Request, res: Response) {
     const { merchantId, competence, storeId, triggerSource } = req.body;
 
     if (!merchantId || !competence) {
-      console.error('[reconciliation-ingest] Missing parameters', { traceId, merchantId, competence });
+      await logToDb('error', 'validation', 'Missing merchantId/competence', {
+        merchantId,
+        competence,
+      });
+      console.error('[reconciliation-ingest] Missing parameters', {
+        traceId,
+        merchantId,
+        competence,
+      });
       return res.status(400).json({
-        error: 'Missing required parameters: merchantId, competence'
+        error: 'Missing required parameters: merchantId, competence',
+      });
+    }
+
+    // 2.1 Resolver accountId (usado em ifood_conciliation_runs)
+    let accountId: string | null = null;
+    try {
+      if (storeId) {
+        let acc = await supabase
+          .from('accounts')
+          .select('id, ifood_merchant_id')
+          .eq('id', storeId)
+          .maybeSingle();
+        if (!acc.data) {
+          acc = await supabase
+            .from('accounts')
+            .select('id, ifood_merchant_id')
+            .eq('ifood_merchant_id', storeId)
+            .maybeSingle();
+        }
+        accountId = acc.data?.id ?? null;
+      } else if (merchantId) {
+        const { data } = await supabase
+          .from('accounts')
+          .select('id')
+          .eq('ifood_merchant_id', merchantId)
+          .maybeSingle();
+        accountId = data?.id ?? null;
+      }
+    } catch (err: any) {
+      await logToDb('warn', 'resolve_account', 'Falha ao resolver accountId (seguindo mesmo assim)', {
+        error: err?.message,
+        merchantId,
+        storeId,
+      });
+    }
+
+    const trigger = (triggerSource as string) ?? 'manual_topbar';
+    const nowIso = new Date().toISOString();
+
+    // 2.2 Criar run em ifood_conciliation_runs (status pending)
+    try {
+      const insertRun = await supabase
+        .from('ifood_conciliation_runs')
+        .insert({
+          account_id: accountId,
+          merchant_id: merchantId,
+          competence,
+          trigger_source: trigger,
+          status: 'pending',
+          requested_at: nowIso,
+        })
+        .select('id')
+        .single();
+
+      if (insertRun.error) {
+        await logToDb('error', 'run_insert', 'Falha ao criar registro de execução', {
+          error: insertRun.error.message,
+          merchantId,
+          accountId,
+        });
+      } else {
+        runId = insertRun.data?.id ?? null;
+        await logToDb('info', 'run_insert', 'Registro de execução criado', { runId });
+      }
+    } catch (err: any) {
+      await logToDb('error', 'run_insert_exception', 'Exceção ao criar registro de execução', {
+        error: err?.message,
+        merchantId,
+        accountId,
       });
     }
 
@@ -82,6 +208,11 @@ export default async function handler(req: Request, res: Response) {
     });
 
     if (tokenError || !tokenData?.access_token) {
+      await logToDb('error', 'auth', 'No token found via ifood-get-token', {
+        storeIdForToken,
+        merchantId,
+        error: tokenError?.message,
+      });
       console.error('[reconciliation-ingest] No token found via ifood-get-token', {
         traceId,
         storeId: storeIdForToken,
@@ -102,6 +233,11 @@ export default async function handler(req: Request, res: Response) {
       tokenLength: token.length,
       tokenStart: token.substring(0, 20) + '...',
       tokenEnd: '...' + token.substring(token.length - 20),
+      expiresAt,
+    });
+
+    await logToDb('info', 'auth', 'Token financeiro obtido com sucesso', {
+      tokenLength: token.length,
       expiresAt,
     });
 
@@ -181,6 +317,10 @@ export default async function handler(req: Request, res: Response) {
               requestId,
               competence,
             });
+            await logToDb('warn', 'request', 'Reutilizando requestId existente a partir de 409', {
+              requestId,
+              competence,
+            });
           } else {
             return res.status(409).json({
               error: 'Conflito: Já existe uma solicitação recente para esta competência (cache de 6 horas)',
@@ -216,17 +356,26 @@ export default async function handler(req: Request, res: Response) {
 
     if (!requestId) {
       console.error('[reconciliation-ingest] No requestId returned', { traceId, requestData });
+      await logToDb('error', 'request', 'Nenhum requestId retornado do iFood', {
+        requestData,
+      });
       return res.status(500).json({
         error: 'No requestId returned from iFood',
-        data: requestData
+        data: requestData,
       });
     }
 
     console.log('[reconciliation-ingest] Report requested successfully', {
       traceId,
       requestId,
-      competence
+      competence,
     });
+    await logToDb('info', 'request', 'Relatório solicitado com sucesso', {
+      requestId,
+      competence,
+    });
+
+    await persistRun({ status: 'running', request_id: requestId });
 
     // 5. Polling até arquivo estar pronto
     let fileUrl: string | null = null;
@@ -294,21 +443,37 @@ export default async function handler(req: Request, res: Response) {
       if (normalizedStatus === 'processed' && downloadUrl) {
         fileUrl = downloadUrl;
       } else if (normalizedStatus === 'error' || normalizedStatus === 'failed') {
-        console.error('[reconciliation-ingest] Report generation failed', { traceId, pollData });
+        console.error('[reconciliation-ingest] Report generation failed', {
+          traceId,
+          pollData,
+        });
+        await logToDb('error', 'download', 'Report generation failed (status error/failed)', {
+          pollData,
+          attempt,
+        });
+        await persistRun({ status: 'error', finished_at: new Date().toISOString(), error_message: 'ifood_report_error' });
         return res.status(500).json({
           error: 'Report generation failed',
           requestId,
-          data: pollData
+          data: pollData,
         });
       }
     }
 
     if (!fileUrl) {
-      console.error('[reconciliation-ingest] Timeout waiting for file', { traceId, requestId });
+      console.error('[reconciliation-ingest] Timeout waiting for file', {
+        traceId,
+        requestId,
+      });
+      await logToDb('error', 'download', 'Timeout ao aguardar CSV', {
+        requestId,
+        attempts: attempt,
+      });
+      await persistRun({ status: 'error', finished_at: new Date().toISOString(), error_message: 'download_timeout' });
       return res.status(408).json({
         error: 'Timeout waiting for report file',
         requestId,
-        attempts: attempt
+        attempts: attempt,
       });
     }
 
@@ -316,8 +481,14 @@ export default async function handler(req: Request, res: Response) {
       traceId,
       requestId,
       fileUrl,
-      attempts: attempt
+      attempts: attempt,
     });
+    await logToDb('info', 'download', 'Arquivo remoto pronto para download', {
+      requestId,
+      fileUrl,
+      attempts: attempt,
+    });
+    await persistRun({ status: 'processing', download_url: fileUrl });
 
     // 6. Baixar arquivo
     console.log('[reconciliation-ingest] Downloading file', { traceId, fileUrl });
@@ -327,6 +498,9 @@ export default async function handler(req: Request, res: Response) {
       console.error('[reconciliation-ingest] File download error', {
         traceId,
         status: fileResponse.status
+      });
+      await logToDb('error', 'download', 'Erro ao baixar arquivo CSV final', {
+        status: fileResponse.status,
       });
       return res.status(500).json({
         error: 'Failed to download file',
@@ -381,6 +555,11 @@ export default async function handler(req: Request, res: Response) {
         traceId,
         error: uploadError
       });
+      await logToDb('error', 'storage', 'Falha ao salvar CSV no bucket', {
+        error: uploadError.message,
+        pathInBucket,
+      });
+      await persistRun({ status: 'error', finished_at: new Date().toISOString(), error_message: 'storage_upload_failed' });
       return res.status(500).json({
         error: 'Failed to upload file to storage',
         details: uploadError.message
@@ -390,6 +569,10 @@ export default async function handler(req: Request, res: Response) {
     console.log('[reconciliation-ingest] File uploaded successfully', {
       traceId,
       uploadData,
+      storagePath,
+      pathInBucket,
+    });
+    await logToDb('info', 'storage', 'CSV armazenado no bucket para processamento async', {
       storagePath,
       pathInBucket,
     });
@@ -408,14 +591,17 @@ export default async function handler(req: Request, res: Response) {
     if (insertError) {
       console.error('[reconciliation-ingest] Failed to register file', {
         traceId,
-        error: insertError
+        error: insertError,
       });
+      await logToDb('warn', 'storage', 'Falha ao registrar em received_files', {
+        error: insertError.message,
+      });
+      await persistRun({ status: 'error', finished_at: new Date().toISOString(), error_message: 'received_files_insert_failed' });
       return res.status(500).json({
         error: 'Failed to register file for processing',
-        details: insertError.message
+        details: insertError.message,
       });
     }
-
     // 10. Disparar processamento Python em background (não bloqueante)
     const processEndpoint = process.env.BACKEND_PROCESS_URL || 'http://127.0.0.1:8000/processar-planilha-conciliacao';
 
@@ -439,11 +625,25 @@ export default async function handler(req: Request, res: Response) {
             ok: response.ok,
             body: text?.slice(0, 500),
           });
+          await logToDb(
+            response.ok ? 'info' : 'error',
+            'processing',
+            'Resposta do backend Python ao disparo de processamento',
+            {
+              status: response.status,
+              ok: response.ok,
+              body: text?.slice(0, 200),
+            },
+          );
         })
         .catch((err: any) => {
           console.error('[reconciliation-ingest] Failed to trigger Python processing', {
             traceId,
             error: err?.message,
+          });
+          logToDb('error', 'processing', 'Erro ao disparar processamento no backend Python', {
+            error: err?.message,
+            endpoint: processEndpoint,
           });
         });
     } catch (err: any) {
@@ -451,7 +651,18 @@ export default async function handler(req: Request, res: Response) {
         traceId,
         error: err?.message,
       });
+      await logToDb('error', 'processing', 'Erro ao agendar processamento no backend Python', {
+        error: err?.message,
+        endpoint: processEndpoint,
+      });
     }
+
+    await persistRun({
+      status: 'success',
+      finished_at: new Date().toISOString(),
+      rows_processed: undefined,
+      download_url: undefined,
+    });
 
     console.log('[reconciliation-ingest] SUCCESS', {
       traceId,
