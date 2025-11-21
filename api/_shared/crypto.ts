@@ -13,6 +13,10 @@
 // Importar crypto para Node.js
 import { webcrypto } from 'node:crypto';
 
+// Declarar Deno como símbolo global opcional para agradar o TypeScript em ambiente Node.
+// Em runtime Node, Deno não existe; os acessos são sempre protegidos por typeof Deno !== 'undefined'.
+declare const Deno: any;
+
 // Use Node.js Web Crypto API (compatível com Deno que já tem crypto global)
 const cryptoAPI = typeof crypto !== 'undefined' ? crypto : webcrypto;
 
