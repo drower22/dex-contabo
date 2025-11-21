@@ -23,7 +23,9 @@ import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import * as zlib from 'zlib';
 
-const IFOOD_BASE_URL = process.env.IFOOD_BASE_URL || 'https://merchant-api.ifood.com.br';
+const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
+const IFOOD_PROXY_BASE = process.env.IFOOD_PROXY_BASE?.trim(); // ex: https://proxy.usa-dex.com.br/api/ifood-proxy
+const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY?.trim();   // chave compartilhada com o proxydex
 const STORAGE_BUCKET = 'conciliacao';
 const MAX_POLL_ATTEMPTS = 24; // 24 tentativas x 5s = 2 minutos
 const POLL_INTERVAL_MS = 5000; // 5 segundos
@@ -104,22 +106,40 @@ export default async function handler(req: Request, res: Response) {
     });
 
     // 4. Solicitar geração do relatório (POST on-demand)
-    const requestUrl = `${IFOOD_BASE_URL}/financial/v3/merchants/${merchantId}/reconciliation/ondemand`;
-    
+    // Alinhar com o handler de download: financial/v3.0 + /reconciliation/on-demand
+    const generatePath = `/financial/v3.0/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand`;
+    const usingProxy = !!IFOOD_PROXY_BASE && !!IFOOD_PROXY_KEY;
+
+    let requestUrl = '';
+    const requestBody = { competence };
+    const requestHeaders: Record<string, string> = {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+
+    if (usingProxy) {
+      const proxyUrl = new URL(IFOOD_PROXY_BASE!);
+      proxyUrl.searchParams.set('path', generatePath);
+      requestUrl = proxyUrl.toString();
+      requestHeaders['x-shared-key'] = IFOOD_PROXY_KEY!;
+    } else {
+      requestUrl = `${IFOOD_BASE_URL}${generatePath}`;
+    }
+
     console.log('[reconciliation-ingest] Requesting report generation', {
       traceId,
       url: requestUrl,
+      usingProxy,
+      generatePath,
       competence,
-      merchantId
+      merchantId,
     });
 
     const requestResponse = await fetch(requestUrl, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ competencia: competence })
+      headers: requestHeaders,
+      body: JSON.stringify(requestBody),
     });
 
     console.log('[reconciliation-ingest] iFood request response', {
@@ -178,21 +198,35 @@ export default async function handler(req: Request, res: Response) {
       attempt++;
       await sleep(POLL_INTERVAL_MS);
 
-      const pollUrl = `${IFOOD_BASE_URL}/financial/v3/merchants/${merchantId}/reconciliation/ondemand/${requestId}`;
-      
+      const pollPath = `/financial/v3.0/merchants/${encodeURIComponent(merchantId)}/reconciliation/on-demand/${encodeURIComponent(requestId)}`;
+
+      let pollUrl = '';
+      const pollHeaders: Record<string, string> = {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+      };
+
+      if (usingProxy) {
+        const proxyUrl = new URL(IFOOD_PROXY_BASE!);
+        proxyUrl.searchParams.set('path', pollPath);
+        pollUrl = proxyUrl.toString();
+        pollHeaders['x-shared-key'] = IFOOD_PROXY_KEY!;
+      } else {
+        pollUrl = `${IFOOD_BASE_URL}${pollPath}`;
+      }
+
       console.log('[reconciliation-ingest] Polling attempt', {
         traceId,
         attempt,
         maxAttempts: MAX_POLL_ATTEMPTS,
-        pollUrl
+        pollUrl,
+        usingProxy,
+        pollPath,
       });
 
       const pollResponse = await fetch(pollUrl, {
         method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        }
+        headers: pollHeaders,
       });
 
       if (!pollResponse.ok) {
