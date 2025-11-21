@@ -354,18 +354,24 @@ export default async function handler(req: Request, res: Response) {
     });
 
     // 8. Salvar no Supabase Storage
-    const fileName = `${merchantId}_${competence}_${Date.now()}.csv`;
-    const filePath = `reconciliation/${fileName}`;
+    // Padrão: concialiacao/{accountId}/{AAAA-MM}/{arquivo-com-data}.csv
+    const accountFolder = storeId || merchantId;
+    const competenceFolder = competence;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `${competenceFolder}-${timestamp}.csv`;
+    const pathInBucket = `${accountFolder}/${competenceFolder}/${fileName}`;
+    const storagePath = `${STORAGE_BUCKET}/${pathInBucket}`;
 
     console.log('[reconciliation-ingest] Uploading to Supabase', {
       traceId,
       bucket: STORAGE_BUCKET,
-      path: filePath
+      pathInBucket,
+      storagePath,
     });
 
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
-      .upload(filePath, csvBuffer, {
+      .upload(pathInBucket, csvBuffer, {
         contentType: 'text/csv',
         upsert: false
       });
@@ -384,25 +390,19 @@ export default async function handler(req: Request, res: Response) {
     console.log('[reconciliation-ingest] File uploaded successfully', {
       traceId,
       uploadData,
-      filePath
+      storagePath,
+      pathInBucket,
     });
 
     // 9. Registrar na tabela received_files para processamento Python
+    const receivedFileId = randomUUID();
     const { error: insertError } = await supabase
       .from('received_files')
       .insert({
-        file_path: filePath,
-        bucket_name: STORAGE_BUCKET,
-        file_type: 'ifood_reconciliation',
+        id: receivedFileId,
+        account_id: accountFolder,
+        storage_path: storagePath,
         status: 'pending',
-        metadata: {
-          merchantId,
-          competence,
-          requestId,
-          storeId,
-          triggerSource,
-          traceId
-        }
       });
 
     if (insertError) {
@@ -419,14 +419,14 @@ export default async function handler(req: Request, res: Response) {
     console.log('[reconciliation-ingest] SUCCESS', {
       traceId,
       requestId,
-      filePath,
+      storagePath,
       competence
     });
 
     return res.status(200).json({
       success: true,
       requestId,
-      filePath,
+      storagePath,
       competence,
       traceId,
       message: 'Relatório solicitado, baixado e registrado para processamento'
