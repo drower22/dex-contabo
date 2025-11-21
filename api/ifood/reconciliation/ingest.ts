@@ -416,6 +416,43 @@ export default async function handler(req: Request, res: Response) {
       });
     }
 
+    // 10. Disparar processamento Python em background (não bloqueante)
+    const processEndpoint = process.env.BACKEND_PROCESS_URL || 'http://127.0.0.1:8000/processar-planilha-conciliacao';
+
+    try {
+      fetch(processEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          file_id: receivedFileId,
+          storage_path: storagePath,
+          // layout_hint opcional: pode ser 'legacy' ou 'v3'. Deixando em branco para auto-detecção.
+        }),
+      })
+        .then(async (response) => {
+          const text = await response.text();
+          console.log('[reconciliation-ingest] Python processing trigger response', {
+            traceId,
+            status: response.status,
+            ok: response.ok,
+            body: text?.slice(0, 500),
+          });
+        })
+        .catch((err: any) => {
+          console.error('[reconciliation-ingest] Failed to trigger Python processing', {
+            traceId,
+            error: err?.message,
+          });
+        });
+    } catch (err: any) {
+      console.error('[reconciliation-ingest] Error scheduling Python processing', {
+        traceId,
+        error: err?.message,
+      });
+    }
+
     console.log('[reconciliation-ingest] SUCCESS', {
       traceId,
       requestId,
