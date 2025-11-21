@@ -241,16 +241,21 @@ export default async function handler(req: Request, res: Response) {
       }
 
       const pollData = await pollResponse.json() as any;
+      const rawStatus = pollData.status;
+      const normalizedStatus = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : rawStatus;
+      const downloadUrl = pollData.fileUrl || pollData.filePath;
+
       console.log('[reconciliation-ingest] Poll response', {
         traceId,
         attempt,
-        status: pollData.status,
-        fileUrl: pollData.fileUrl
+        status: rawStatus,
+        normalizedStatus,
+        fileUrl: downloadUrl
       });
 
-      if (pollData.status === 'COMPLETED' && pollData.fileUrl) {
-        fileUrl = pollData.fileUrl;
-      } else if (pollData.status === 'FAILED') {
+      if (normalizedStatus === 'processed' && downloadUrl) {
+        fileUrl = downloadUrl;
+      } else if (normalizedStatus === 'error' || normalizedStatus === 'failed') {
         console.error('[reconciliation-ingest] Report generation failed', { traceId, pollData });
         return res.status(500).json({
           error: 'Report generation failed',
