@@ -644,7 +644,8 @@ def run_processing_conciliacao(file_id: str, storage_path: str, layout_hint: str
         
         # Remove account_id prefix se presente (formato: account_id/2025-11/...)
         # O Storage salva direto em 2025-11/... sem o account_id
-        if '/' in path_in_bucket and len(path_in_bucket.split('/')[0]) == 36:  # UUID tem 36 chars
+        remove_prefix = os.environ.get("REMOVE_ACCOUNT_ID_PREFIX", "false").lower() == "true"
+        if remove_prefix and '/' in path_in_bucket and len(path_in_bucket.split('/')[0]) == 36:  # UUID tem 36 chars
             path_in_bucket = '/'.join(path_in_bucket.split('/')[1:])
             print(f"[CONCILIATION_TASK] Account ID removido do path. Novo path: '{path_in_bucket}'")
         
