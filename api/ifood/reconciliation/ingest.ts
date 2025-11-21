@@ -149,6 +149,9 @@ export default async function handler(req: Request, res: Response) {
       headers: Object.fromEntries(requestResponse.headers.entries())
     });
 
+    let requestId: string | null = null;
+    let requestData: any = null;
+
     if (!requestResponse.ok) {
       const errorText = await requestResponse.text();
       console.error('[reconciliation-ingest] iFood request error', {
@@ -159,22 +162,57 @@ export default async function handler(req: Request, res: Response) {
 
       // 409 = já existe solicitação recente (cache de 6h)
       if (requestResponse.status === 409) {
-        return res.status(409).json({
-          error: 'Conflito: Já existe uma solicitação recente para esta competência (cache de 6 horas)',
-          competence,
-          details: errorText
+        try {
+          const parsed = JSON.parse(errorText);
+          const message = typeof parsed?.message === 'string' ? parsed.message : undefined;
+          let extractedRequestId: string | null = null;
+
+          if (message) {
+            const match = message.match(/request Id:\s*([0-9a-f-]+)/i);
+            if (match && match[1]) {
+              extractedRequestId = match[1];
+            }
+          }
+
+          if (extractedRequestId) {
+            requestId = extractedRequestId;
+            console.log('[reconciliation-ingest] Reusing existing requestId from 409 conflict', {
+              traceId,
+              requestId,
+              competence,
+            });
+          } else {
+            return res.status(409).json({
+              error: 'Conflito: Já existe uma solicitação recente para esta competência (cache de 6 horas)',
+              competence,
+              details: errorText
+            });
+          }
+        } catch (parseError: any) {
+          console.warn('[reconciliation-ingest] Failed to parse 409 response body', {
+            traceId,
+            error: parseError?.message,
+            rawBody: errorText,
+          });
+          return res.status(409).json({
+            error: 'Conflito: Já existe uma solicitação recente para esta competência (cache de 6 horas)',
+            competence,
+            details: errorText
+          });
+        }
+      } else {
+        return res.status(requestResponse.status).json({
+          error: 'iFood API error on request',
+          status: requestResponse.status,
+          message: errorText
         });
       }
-
-      return res.status(requestResponse.status).json({
-        error: 'iFood API error on request',
-        status: requestResponse.status,
-        message: errorText
-      });
     }
 
-    const requestData = await requestResponse.json() as any;
-    const requestId = requestData.requestId;
+    if (!requestId) {
+      requestData = await requestResponse.json() as any;
+      requestId = requestData.requestId;
+    }
 
     if (!requestId) {
       console.error('[reconciliation-ingest] No requestId returned', { traceId, requestData });
