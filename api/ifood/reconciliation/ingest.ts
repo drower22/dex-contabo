@@ -67,47 +67,40 @@ export default async function handler(req: Request, res: Response) {
       });
     }
 
-    // 3. Buscar token do Supabase (scope financial)
-    console.log('[reconciliation-ingest] Fetching token from Supabase', {
+    // 3. Buscar token descriptografado via Edge Function (scope financial)
+    console.log('[reconciliation-ingest] Fetching token via ifood-get-token (Supabase Edge Function)', {
       traceId,
-      storeId: storeId || 'not provided'
+      storeId: storeId || 'not provided',
+      merchantId,
     });
 
-    const { data: authData, error: authError } = await supabase
-      .from('ifood_store_auth')
-      .select('access_token, expires_at')
-      .eq('account_id', storeId || merchantId)
-      .eq('scope', 'financial')
-      .eq('status', 'connected')
-      .maybeSingle();
+    const storeIdForToken = storeId || merchantId;
+    const { data: tokenData, error: tokenError } = await supabase.functions.invoke('ifood-get-token', {
+      body: { storeId: storeIdForToken, scope: 'financial' },
+    });
 
-    if (authError || !authData?.access_token) {
-      console.error('[reconciliation-ingest] No token found', {
+    if (tokenError || !tokenData?.access_token) {
+      console.error('[reconciliation-ingest] No token found via ifood-get-token', {
         traceId,
-        storeId,
+        storeId: storeIdForToken,
         merchantId,
-        error: authError?.message
+        error: tokenError?.message,
       });
       return res.status(401).json({
         error: 'No valid financial token found',
-        details: authError?.message
+        details: tokenError?.message,
       });
     }
 
-    const token = authData.access_token;
-    
-    // LOG TEMPORÁRIO: Token completo para debug no API Reference
-    console.log('[reconciliation-ingest] ========================================');
-    console.log('[reconciliation-ingest] TOKEN COMPLETO (COPIE PARA API REFERENCE):');
-    console.log(token);
-    console.log('[reconciliation-ingest] ========================================');
-    
+    const token = tokenData.access_token as string;
+    const expiresAt = (tokenData as any).expires_at as string | undefined;
+
     console.log('[reconciliation-ingest] Token info', {
       traceId,
       tokenLength: token.length,
       tokenStart: token.substring(0, 20) + '...',
       tokenEnd: '...' + token.substring(token.length - 20),
-      expiresAt: authData.expires_at
+      expiresAt,
     });
 
     // 4. Solicitar geração do relatório (POST on-demand)
