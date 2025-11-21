@@ -655,7 +655,6 @@ def run_processing_conciliacao(file_id: str, storage_path: str, layout_hint: str
         print(f"[CONCILIATION_TASK] Download concluído. Bytes recebidos: {len(file_content) if file_content else '0'}")
         
         # Detectar extensão correta do arquivo
-        import os
         file_extension = os.path.splitext(path_in_bucket)[1] or '.csv'
         print(f"[CONCILIATION_TASK] Extensão detectada: {file_extension}")
         
