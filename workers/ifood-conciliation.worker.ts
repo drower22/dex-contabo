@@ -5,11 +5,21 @@ import { randomUUID } from 'crypto';
 
 // Carregar .env do projeto
 // Quando compilado, __dirname será dist/workers, então subimos dois níveis até a raiz
-dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const DEX_API_BASE_URL = (process.env.DEX_API_BASE_URL || 'http://localhost:3000').trim();
+
+// Log seguro para depuração (não expõe segredos)
+// eslint-disable-next-line no-console
+console.log('[ifood-conciliation-worker] ENV DEBUG', {
+  cwd: process.cwd(),
+  dirname: __dirname,
+  hasSupabaseUrl: !!SUPABASE_URL,
+  hasServiceRole: !!SUPABASE_SERVICE_ROLE_KEY,
+  supabaseUrlPreview: SUPABASE_URL ? SUPABASE_URL.slice(0, 30) : null,
+});
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   // eslint-disable-next-line no-console

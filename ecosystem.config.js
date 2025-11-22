@@ -89,7 +89,10 @@ module.exports = {
     // Worker de Jobs de Conciliação iFood (fila ifood_jobs)
     {
       name: 'ifood-conciliation_worker',
-      script: 'dist/workers/ifood-conciliation.worker.js',
+      script: './node_modules/.bin/ts-node',
+      args: 'workers/ifood-conciliation.worker.ts',
+      cwd: '/home/dex/dex-app',
+      interpreter: 'none',
       instances: 1,
       exec_mode: 'fork',
       env_file: '.env',
