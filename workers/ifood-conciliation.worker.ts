@@ -1,5 +1,10 @@
+import path from 'path';
+import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
+
+// Carregar .env do projeto (mesmo padrão de api/server.ts)
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
