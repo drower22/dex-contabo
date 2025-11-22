@@ -88,7 +88,7 @@ module.exports = {
 
     // Worker de Jobs de Conciliação iFood (fila ifood_jobs)
     {
-      name: 'dex-worker-ifood',
+      name: 'ifood-conciliation_worker',
       script: 'dist/workers/ifood-conciliation.worker.js',
       instances: 1,
       exec_mode: 'fork',
