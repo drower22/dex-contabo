@@ -85,5 +85,32 @@ module.exports = {
       max_restarts: 10,
       min_uptime: '10s',
     },
+
+    // Worker de Jobs de Conciliação iFood (fila ifood_jobs)
+    {
+      name: 'dex-worker-ifood',
+      script: 'dist/workers/ifood-conciliation.worker.js',
+      instances: 1,
+      exec_mode: 'fork',
+      env: {
+        NODE_ENV: 'production',
+        SUPABASE_URL: process.env.SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        DEX_API_BASE_URL: process.env.DEX_API_BASE_URL || 'http://localhost:3000',
+        IFOOD_WORKER_MAX_CONCURRENCY: process.env.IFOOD_WORKER_MAX_CONCURRENCY || '5',
+        IFOOD_WORKER_POLL_INTERVAL_MS: process.env.IFOOD_WORKER_POLL_INTERVAL_MS || '10000',
+        IFOOD_WORKER_MAX_ATTEMPTS: process.env.IFOOD_WORKER_MAX_ATTEMPTS || '3',
+      },
+      error_file: './logs/worker-ifood-error.log',
+      out_file: './logs/worker-ifood-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      merge_logs: true,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '512M',
+      restart_delay: 5000,
+      max_restarts: 10,
+      min_uptime: '10s',
+    },
   ],
 };
