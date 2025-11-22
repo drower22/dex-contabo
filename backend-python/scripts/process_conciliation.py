@@ -393,28 +393,47 @@ def save_data_in_batches(logger, supabase_client: Client, df: pd.DataFrame, acco
     # Isso garante que sempre temos apenas a versão mais recente dos dados
     if unique_records:
         # Pegar competências únicas dos registros a inserir
-        competences_to_delete = set()
+        competences_to_delete: set[str] = set()
         for rec in unique_records:
             comp_date = rec.get('competence_date')
             if comp_date:
                 # Extrair ano-mês da competência (YYYY-MM)
                 if isinstance(comp_date, str) and len(comp_date) >= 7:
                     competences_to_delete.add(comp_date[:7])  # YYYY-MM
-        
+
         if competences_to_delete:
-            logger.log('info', f'Deletando registros antigos das competências: {sorted(competences_to_delete)}')
-            for comp in competences_to_delete:
+            from datetime import datetime as _dt
+            from datetime import date as _date
+
+            logger.log('info', f'Deletando registros antigos das competências (account_id={account_id}): {sorted(competences_to_delete)}')
+
+            for comp in sorted(competences_to_delete):
                 try:
-                    # Deletar registros da competência específica para este account_id
-                    result = supabase_client.table(TABLE_CONCILIATION)\
-                        .delete()\
-                        .eq('account_id', account_id)\
-                        .gte('competence_date', f'{comp}-01')\
-                        .lt('competence_date', f'{comp}-32')\
+                    # comp vem no formato 'YYYY-MM'
+                    try:
+                        year, month = map(int, comp.split('-'))
+                        month_start = _date(year, month, 1)
+                        # calcular primeiro dia do mês seguinte
+                        if month == 12:
+                            next_month_start = _date(year + 1, 1, 1)
+                        else:
+                            next_month_start = _date(year, month + 1, 1)
+                    except Exception as parse_exc:
+                        logger.log('warning', f"Competência '{comp}' inválida para deleção: {parse_exc}")
+                        continue
+
+                    result = (
+                        supabase_client
+                        .table(TABLE_CONCILIATION)
+                        .delete()
+                        .eq('account_id', account_id)
+                        .gte('competence_date', month_start.isoformat())
+                        .lt('competence_date', next_month_start.isoformat())
                         .execute()
-                    logger.log('info', f'Competência {comp} limpa para account_id {account_id}')
+                    )
+                    logger.log('info', f"Competência {comp} limpa para account_id {account_id} (intervalo {month_start.isoformat()} .. {next_month_start.isoformat()})")
                 except Exception as e:
-                    logger.log('warning', f'Falha ao deletar competência {comp}: {e}')
+                    logger.log('warning', f'Falha ao deletar competência {comp} para account_id {account_id}: {e}')
 
     batch_size = 100
     total_batches = (len(unique_records) + batch_size - 1) // batch_size if unique_records else 0

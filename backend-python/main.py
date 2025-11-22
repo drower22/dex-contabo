@@ -611,6 +611,36 @@ async def processar_planilha_financeiro_endpoint(process_request: ProcessFinance
     background_tasks.add_task(run_processing_financeiro, process_request.file_id)
     return {"message": "Processamento da planilha financeira agendado com sucesso!", "file_id": process_request.file_id}
 
+def cleanup_old_conciliation_files(logger: SupabaseLogger, supabase_client: Client, storage_path: str, keep_last: int = 3) -> None:
+    try:
+        clean_path = storage_path.lstrip('/')
+        parts = clean_path.split('/')
+        if len(parts) < 4:
+            logger.log('warning', f"[storage_cleanup] storage_path '{storage_path}' inválido para limpeza automática.")
+            return
+        bucket_name, account_folder, competence = parts[0], parts[1], parts[2]
+        folder_prefix = f"{account_folder}/{competence}"
+        entries = supabase_client.storage.from_(bucket_name).list(path=folder_prefix)
+        if not entries:
+            return
+        files = [e for e in entries if isinstance(e, dict) and e.get('name')]
+        if len(files) <= keep_last:
+            return
+        def _sort_key(e: dict) -> str:
+            created = e.get('created_at')
+            if created is not None:
+                return str(created)
+            return str(e.get('name') or '')
+        files.sort(key=_sort_key)
+        to_delete = files[:-keep_last]
+        paths = [f"{folder_prefix}/{e['name']}" for e in to_delete if e.get('name')]
+        if not paths:
+            return
+        supabase_client.storage.from_(bucket_name).remove(paths)
+        logger.log('info', f"[storage_cleanup] Removidos {len(paths)} arquivos antigos de '{bucket_name}/{folder_prefix}', mantendo os {keep_last} mais recentes.")
+    except Exception as exc:
+        logger.log('warning', f"[storage_cleanup] Falha ao limpar arquivos antigos para '{storage_path}': {exc}")
+
 def run_processing_conciliacao(file_id: str, storage_path: str, layout_hint: str | None = None):
     """Função segura que executa o processamento de CONCILIAÇÃO em background."""
     supabase_processor = None
@@ -678,6 +708,23 @@ def run_processing_conciliacao(file_id: str, storage_path: str, layout_hint: str
         )
 
         logger.log('INFO', 'Função de processamento de conciliação concluída com sucesso.')
+
+        try:
+            status_resp = supabase_processor.table('received_files').select('status').eq('id', file_id).single().execute()
+            status_value = (status_resp.data or {}).get('status')
+        except Exception as status_exc:
+            logger.log('warning', f"[storage_cleanup] Falha ao consultar status de received_files para file_id {file_id}: {status_exc}")
+            status_value = None
+
+        if status_value == 'processed':
+            try:
+                keep_last_str = os.environ.get("CONCILIATION_STORAGE_KEEP_LAST", "3")
+                keep_last = int(keep_last_str)
+            except Exception:
+                keep_last = 3
+            cleanup_old_conciliation_files(logger, supabase_processor, storage_path, keep_last=keep_last)
+        else:
+            logger.log('info', f"[storage_cleanup] Pulando limpeza automática para file_id {file_id} porque status='{status_value}'")
 
     except Exception as e:
         error_message = f"Erro no orquestrador de processamento de conciliação: {e}"
