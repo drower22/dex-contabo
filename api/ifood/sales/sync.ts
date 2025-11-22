@@ -61,13 +61,20 @@ async function fetchSalesPage(
   console.log(`📥 [syncIfoodSales] Response status:`, response.status, response.statusText);
 
   if (!response.ok) {
+    const errorText = await response.text();
+
     if (response.status === 400) {
-      const errorText = await response.text();
       console.warn(`⚠️ [syncIfoodSales] Status 400 na página ${page}:`, errorText);
       // Fim das páginas
       return { sales: [], hasMore: false };
     }
-    const errorText = await response.text();
+
+    // Caso comum de loja sem vendas no período: tratar como 0 vendas em vez de erro
+    if (response.status === 404 && errorText.includes('No sales found between')) {
+      console.warn(`⚠️ [syncIfoodSales] Nenhuma venda encontrada no período para a página ${page}:`, errorText);
+      return { sales: [], hasMore: false };
+    }
+
     console.error(`❌ [syncIfoodSales] Erro na página ${page}:`, errorText);
     throw new Error(`Erro ao buscar vendas: ${response.status}`);
   }
