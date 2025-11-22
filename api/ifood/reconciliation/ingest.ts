@@ -72,6 +72,31 @@ export default async function handler(req: Request, res: Response) {
     }
   };
 
+  type CentralLogLevel = 'info' | 'warn' | 'error';
+
+  const logCentral = async (
+    level: CentralLogLevel,
+    message: string,
+    accountIdForLog?: string | null,
+    context?: any,
+  ) => {
+    try {
+      await supabase.from('logs').insert({
+        level,
+        message,
+        account_id: accountIdForLog ?? null,
+        context: context ? JSON.parse(JSON.stringify(context)) : null,
+      });
+    } catch (err: any) {
+      console.error('[reconciliation-ingest] central_log_insert_failed', {
+        traceId,
+        level,
+        message,
+        error: err?.message,
+      });
+    }
+  };
+
   const persistRun = async (patch: Record<string, any>) => {
     if (!runId) return;
     try {
@@ -186,6 +211,18 @@ export default async function handler(req: Request, res: Response) {
       } else {
         runId = insertRun.data?.id ?? null;
         await logToDb('info', 'run_insert', 'Registro de execução criado', { runId });
+        await logCentral('info', 'ifood_conciliation.start', accountId ?? null, {
+          feature: 'ifood_conciliation',
+          system: 'dex-api',
+          stage: 'start',
+          status: 'started',
+          run_id: runId,
+          trace_id: traceId,
+          merchant_id: merchantId,
+          store_id: storeId,
+          competence,
+          trigger_source: trigger,
+        });
       }
     } catch (err: any) {
       await logToDb('error', 'run_insert_exception', 'Exceção ao criar registro de execução', {
@@ -212,6 +249,19 @@ export default async function handler(req: Request, res: Response) {
         storeIdForToken,
         merchantId,
         error: tokenError?.message,
+      });
+      await logCentral('error', 'ifood_conciliation.error', accountId ?? null, {
+        feature: 'ifood_conciliation',
+        system: 'dex-api',
+        stage: 'auth',
+        status: 'error',
+        run_id: runId,
+        trace_id: traceId,
+        merchant_id: merchantId,
+        store_id: storeId,
+        competence,
+        error_stage: 'auth',
+        error_message: tokenError?.message || 'No token found via ifood-get-token',
       });
       console.error('[reconciliation-ingest] No token found via ifood-get-token', {
         traceId,
@@ -555,6 +605,18 @@ export default async function handler(req: Request, res: Response) {
         traceId,
         error: uploadError
       });
+      await logCentral('error', 'ifood_conciliation.error', accountId ?? null, {
+        feature: 'ifood_conciliation',
+        system: 'dex-api',
+        stage: 'storage_upload',
+        status: 'error',
+        run_id: runId,
+        trace_id: traceId,
+        storage_path: storagePath,
+        path_in_bucket: pathInBucket,
+        error_stage: 'storage_upload',
+        error_message: uploadError.message,
+      });
       await logToDb('error', 'storage', 'Falha ao salvar CSV no bucket', {
         error: uploadError.message,
         pathInBucket,
@@ -592,6 +654,18 @@ export default async function handler(req: Request, res: Response) {
       console.error('[reconciliation-ingest] Failed to register file', {
         traceId,
         error: insertError,
+      });
+      await logCentral('error', 'ifood_conciliation.error', accountId ?? null, {
+        feature: 'ifood_conciliation',
+        system: 'dex-api',
+        stage: 'register_received_file',
+        status: 'error',
+        run_id: runId,
+        trace_id: traceId,
+        storage_path: storagePath,
+        file_id: receivedFileId,
+        error_stage: 'register_received_file',
+        error_message: insertError.message,
       });
       await logToDb('warn', 'storage', 'Falha ao registrar em received_files', {
         error: insertError.message,
@@ -641,6 +715,18 @@ export default async function handler(req: Request, res: Response) {
             traceId,
             error: err?.message,
           });
+          logCentral('error', 'ifood_conciliation.error', accountId ?? null, {
+            feature: 'ifood_conciliation',
+            system: 'dex-api',
+            stage: 'python_trigger',
+            status: 'error',
+            run_id: runId,
+            trace_id: traceId,
+            storage_path: storagePath,
+            file_id: receivedFileId,
+            error_stage: 'python_trigger',
+            error_message: err?.message,
+          });
           logToDb('error', 'processing', 'Erro ao disparar processamento no backend Python', {
             error: err?.message,
             endpoint: processEndpoint,
@@ -664,6 +750,20 @@ export default async function handler(req: Request, res: Response) {
       download_url: undefined,
     });
 
+    await logCentral('info', 'ifood_conciliation.success', accountId ?? null, {
+      feature: 'ifood_conciliation',
+      system: 'dex-api',
+      stage: 'finish',
+      status: 'success',
+      run_id: runId,
+      trace_id: traceId,
+      merchant_id: merchantId,
+      store_id: storeId,
+      competence,
+      file_id: receivedFileId,
+      storage_path: storagePath,
+    });
+
     console.log('[reconciliation-ingest] SUCCESS', {
       traceId,
       requestId,
@@ -685,6 +785,18 @@ export default async function handler(req: Request, res: Response) {
       traceId,
       error: error.message,
       stack: error.stack
+    });
+
+    await logCentral('error', 'ifood_conciliation.error', undefined, {
+      feature: 'ifood_conciliation',
+      system: 'dex-api',
+      stage: 'orchestrator',
+      status: 'error',
+      run_id: runId,
+      trace_id: traceId,
+      error_stage: 'orchestrator',
+      error_message: error?.message,
+      stack: error?.stack,
     });
 
     return res.status(500).json({

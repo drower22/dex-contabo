@@ -663,6 +663,14 @@ def run_processing_conciliacao(file_id: str, storage_path: str, layout_hint: str
 
         logger.set_context(file_id=file_id, account_id=account_id)
 
+        logger.log('INFO', 'ifood_conciliation.python.start', {
+            "feature": "ifood_conciliation",
+            "system": "dex-python",
+            "stage": "download_from_storage",
+            "status": "started",
+            "storage_path": storage_path,
+        })
+
         # Faz o download do arquivo para um local temporário
         logger.log('INFO', f'Iniciando download do arquivo de conciliação: {storage_path}')
         if layout_hint:
@@ -709,6 +717,13 @@ def run_processing_conciliacao(file_id: str, storage_path: str, layout_hint: str
 
         logger.log('INFO', 'Função de processamento de conciliação concluída com sucesso.')
 
+        logger.log('INFO', 'ifood_conciliation.python.success', {
+            "feature": "ifood_conciliation",
+            "system": "dex-python",
+            "stage": "process_file",
+            "status": "success",
+        })
+
         try:
             status_resp = supabase_processor.table('received_files').select('status').eq('id', file_id).single().execute()
             status_value = (status_resp.data or {}).get('status')
@@ -731,6 +746,14 @@ def run_processing_conciliacao(file_id: str, storage_path: str, layout_hint: str
         tb_str = traceback.format_exc()
         if logger:
             logger.log('CRITICAL', error_message, context={"traceback": tb_str})
+            logger.log('CRITICAL', 'ifood_conciliation.python.error', {
+                "feature": "ifood_conciliation",
+                "system": "dex-python",
+                "stage": "orchestrator",
+                "status": "error",
+                "error_message": error_message,
+                "traceback": tb_str,
+            })
             update_file_status(logger, supabase_processor, file_id, 'error', error_message)
         else:
             print(f"ERRO CRÍTICO (logger indisponível): {error_message}", file=sys.stderr)
