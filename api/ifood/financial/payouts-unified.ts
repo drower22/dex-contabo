@@ -4,7 +4,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { decryptFromB64 } from '../_shared/crypto';
+import { decryptFromB64 } from '../../_shared/crypto';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -72,8 +72,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
 
-    const settlements = settlementsRes.ok ? await settlementsRes.json() : { items: [] };
-    const anticipations = anticipationsRes.ok ? await anticipationsRes.json() : { items: [] };
+    const settlements: any = settlementsRes.ok ? await settlementsRes.json() : { items: [] };
+    const anticipations: any = anticipationsRes.ok ? await anticipationsRes.json() : { items: [] };
 
     return res.status(200).json({
       settlements: settlements.items || [],

@@ -20,7 +20,6 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { BodyInit } from 'undici';
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*';
 const cors = {
@@ -99,7 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers['Content-Type'] = req.headers['content-type'] as string || 'application/json';
     }
 
-    let body: BodyInit | undefined;
+    let body: any;
     if (method !== 'GET' && method !== 'HEAD') {
       const rawBody = (req as any).rawBody;
       if (rawBody) {

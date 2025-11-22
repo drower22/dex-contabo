@@ -31,7 +31,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import zlib from 'zlib';
-import { buildIFoodUrl, proxifyIFoodUrl, withIFoodProxy } from '../_shared/proxy';
+import { buildIFoodUrl, proxifyIFoodUrl, withIFoodProxy } from '../../_shared/proxy';
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*';
 const cors = {
