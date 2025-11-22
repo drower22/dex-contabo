@@ -129,7 +129,6 @@ const reconciliationIngestHandler = loadHandler('./ifood/reconciliation/ingest')
 const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
 const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation/index');
 const salesHandler = loadHandler('./ifood/sales/index');
-const salesIngestHistoryHandler = loadHandler('./ifood/sales/ingest-history');
 const salesSyncHandler = loadHandler('./ifood/sales/sync');
 const ifoodScheduleJobsCronHandler = loadHandler('./cron/ifood-schedule-jobs');
 console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
@@ -252,16 +251,6 @@ if (salesHandler) {
 } else {
   app.get('/api/ifood/sales', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Sales handler not loaded' });
-  });
-}
-
-// Rota de Ingestão Histórica de Sales
-if (salesIngestHistoryHandler) {
-  app.post('/api/ifood/sales/ingest-history', adaptVercelHandler(salesIngestHistoryHandler));
-  console.log('✅ Sales ingest-history handler loaded');
-} else {
-  app.post('/api/ifood/sales/ingest-history', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'Sales ingest-history handler not loaded' });
   });
 }
 

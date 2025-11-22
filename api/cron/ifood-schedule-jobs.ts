@@ -65,9 +65,8 @@ export default async function handler(req: any, res: any) {
 
     const { data: schedules, error: schedulesError } = await supabase
       .from('ifood_schedules')
-      .select('account_id, merchant_id, enabled, run_conciliation')
-      .eq('enabled', true)
-      .eq('run_conciliation', true);
+      .select('account_id, merchant_id, enabled, run_conciliation, run_sales_sync')
+      .eq('enabled', true);
 
     if (schedulesError) {
       // eslint-disable-next-line no-console
@@ -76,57 +75,98 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const effectiveSchedules = (schedules || []).filter((row: any) => row.account_id && row.merchant_id);
+    const baseSchedules = (schedules || []).filter((row: any) => row.account_id && row.merchant_id);
+    const conciliationSchedules = baseSchedules.filter((row: any) => row.run_conciliation);
+    const salesSyncSchedules = baseSchedules.filter((row: any) => row.run_sales_sync);
 
     if (dryRun) {
       res.status(200).json({
         message: 'Dry run - no jobs inserted',
         competence,
-        total_schedules: effectiveSchedules.length,
+        total_schedules: baseSchedules.length,
+        conciliation_schedules: conciliationSchedules.length,
+        sales_sync_schedules: salesSyncSchedules.length,
       });
       return;
     }
 
-    if (effectiveSchedules.length === 0) {
+    if (conciliationSchedules.length === 0 && salesSyncSchedules.length === 0) {
       res.status(200).json({
-        message: 'No enabled schedules for conciliation',
+        message: 'No enabled schedules for conciliation or sales_sync',
         competence,
-        total_schedules: 0,
-        inserted: 0,
+        total_schedules: baseSchedules.length,
+        conciliation_schedules: 0,
+        sales_sync_schedules: 0,
+        inserted_conciliation: 0,
+        inserted_sales_sync: 0,
       });
       return;
     }
 
     const nowIso = new Date().toISOString();
 
-    const jobsPayload = effectiveSchedules.map((row: any) => ({
-      job_type: 'conciliation',
-      account_id: row.account_id,
-      merchant_id: row.merchant_id,
-      competence,
-      scheduled_for: nowIso,
-      status: 'pending',
-    }));
+    let conciliationInserted = 0;
+    let salesSyncInserted = 0;
 
-    const { error: insertError } = await supabase
-      .from('ifood_jobs')
-      .upsert(jobsPayload, {
-        onConflict: 'job_type,account_id,competence',
-        ignoreDuplicates: true,
-      });
+    if (conciliationSchedules.length > 0) {
+      const conciliationJobsPayload = conciliationSchedules.map((row: any) => ({
+        job_type: 'conciliation',
+        account_id: row.account_id,
+        merchant_id: row.merchant_id,
+        competence,
+        scheduled_for: nowIso,
+        status: 'pending',
+      }));
 
-    if (insertError) {
-      // eslint-disable-next-line no-console
-      console.error('[ifood-schedule-jobs] Falha ao criar jobs em ifood_jobs:', insertError.message);
-      res.status(500).json({ error: 'Failed to upsert jobs', details: insertError.message });
-      return;
+      const { error: insertError } = await supabase
+        .from('ifood_jobs')
+        .upsert(conciliationJobsPayload, {
+          onConflict: 'job_type,account_id,competence',
+          ignoreDuplicates: true,
+        });
+
+      if (insertError) {
+        // eslint-disable-next-line no-console
+        console.error('[ifood-schedule-jobs] Falha ao criar jobs de conciliação em ifood_jobs:', insertError.message);
+        res.status(500).json({ error: 'Failed to upsert conciliation jobs', details: insertError.message });
+        return;
+      }
+
+      conciliationInserted = conciliationJobsPayload.length;
+    }
+
+    if (salesSyncSchedules.length > 0) {
+      const salesJobsPayload = salesSyncSchedules.map((row: any) => ({
+        job_type: 'sales_sync',
+        account_id: row.account_id,
+        merchant_id: row.merchant_id,
+        competence: null,
+        scheduled_for: nowIso,
+        status: 'pending',
+      }));
+
+      const { error: insertSalesError } = await supabase
+        .from('ifood_jobs')
+        .insert(salesJobsPayload);
+
+      if (insertSalesError) {
+        // eslint-disable-next-line no-console
+        console.error('[ifood-schedule-jobs] Falha ao criar jobs de sales_sync em ifood_jobs:', insertSalesError.message);
+        res.status(500).json({ error: 'Failed to insert sales_sync jobs', details: insertSalesError.message });
+        return;
+      }
+
+      salesSyncInserted = salesJobsPayload.length;
     }
 
     res.status(200).json({
-      message: 'iFood conciliation jobs scheduled',
+      message: 'iFood jobs scheduled',
       competence,
-      total_schedules: effectiveSchedules.length,
-      attempted_inserts: jobsPayload.length,
+      total_schedules: baseSchedules.length,
+      conciliation_schedules: conciliationSchedules.length,
+      sales_sync_schedules: salesSyncSchedules.length,
+      inserted_conciliation: conciliationInserted,
+      inserted_sales_sync: salesSyncInserted,
     });
   } catch (err: any) {
     // eslint-disable-next-line no-console

@@ -54,28 +54,25 @@ module.exports = {
       max_memory_restart: '1G',
     },
 
-    // Worker de Sync de Vendas iFood
+    // Worker de Sync de Vendas iFood (fila ifood_jobs)
     {
-      name: 'ifood-sales-worker',
-      script: 'dist/workers/ifood-sales-sync.worker.js',
+      name: 'ifood-sales_worker',
+      script: './node_modules/.bin/ts-node',
+      args: 'workers/ifood-sales.worker.ts',
+      cwd: '/home/dex/dex-app',
+      interpreter: 'none',
       instances: 1,
       exec_mode: 'fork',
+      env_file: '.env',
       env: {
         NODE_ENV: 'production',
-        // Supabase
-        SUPABASE_URL: process.env.SUPABASE_URL,
-        SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
-        SUPABASE_KEY: process.env.SUPABASE_KEY,
-        // Redis
-        REDIS_HOST: process.env.REDIS_HOST || 'localhost',
-        REDIS_PORT: process.env.REDIS_PORT || '6379',
-        // iFood Proxy
-        IFOOD_PROXY_BASE: process.env.IFOOD_PROXY_BASE,
-        IFOOD_PROXY_KEY: process.env.IFOOD_PROXY_KEY,
-        SHARED_PROXY_KEY: process.env.SHARED_PROXY_KEY,
+        DEX_API_BASE_URL: 'http://localhost:3000',
+        IFOOD_WORKER_MAX_CONCURRENCY: '5',
+        IFOOD_WORKER_POLL_INTERVAL_MS: '10000',
+        IFOOD_WORKER_MAX_ATTEMPTS: '3',
       },
-      error_file: './logs/worker-error.log',
-      out_file: './logs/worker-out.log',
+      error_file: './logs/worker-sales-error.log',
+      out_file: './logs/worker-sales-out.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
       merge_logs: true,
       autorestart: true,
