@@ -273,7 +273,28 @@ export async function syncIfoodSales(req: Request, res: Response) {
         }
       }
 
-      // 4. Salvar no banco
+      // 4. Limpar vendas existentes no período antes de salvar novas
+      console.log('🧹 [syncIfoodSales] Limpando vendas existentes no período antes de salvar novas...', {
+        accountId,
+        merchantId,
+        periodStart,
+        periodEnd,
+      });
+
+      const { error: deleteError } = await supabase
+        .from('ifood_sales')
+        .delete()
+        .eq('account_id', accountId)
+        .eq('merchant_id', merchantId)
+        .gte('created_at', `${periodStart}T00:00:00`)
+        .lte('created_at', `${periodEnd}T23:59:59.999Z`);
+
+      if (deleteError) {
+        console.error('❌ [syncIfoodSales] Erro ao limpar vendas existentes no período:', deleteError);
+        throw new Error('Erro ao limpar vendas existentes no período');
+      }
+
+      // 5. Salvar no banco
       const savedCount = await saveSales(allSales, accountId, merchantId);
 
       console.log(`✅ [API] Sync concluído: ${savedCount} vendas sincronizadas em ${chunks.length} chunks`);
