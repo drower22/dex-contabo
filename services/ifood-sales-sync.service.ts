@@ -116,10 +116,10 @@ export async function fetchIfoodSales(
     throw new Error(`Erro ao buscar vendas: ${response.status} ${response.statusText}`);
   }
 
-  const data = await response.json();
-  const sales = data.sales || [];
-  const currentPage = data.page || page;
-  const size = data.size || sales.length;
+  const data: any = await response.json();
+  const sales = data?.sales || [];
+  const currentPage = data?.page || page;
+  const size = data?.size || sales.length;
   
   // Calcular se há mais páginas baseado no total de vendas e página atual
   // Se a página atual * tamanho < total de vendas retornadas, há mais páginas

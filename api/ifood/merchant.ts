@@ -20,6 +20,7 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { BodyInit } from 'undici';
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*';
 const cors = {

@@ -171,7 +171,7 @@ app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
       if (!value) continue;
       if (forbiddenHeaders.includes(key.toLowerCase())) continue;
       const headerValue = Array.isArray(value) ? value.join(',') : value;
-      headers.set(key, headerValue);
+      headers.set(key, String(headerValue));
     }
 
     const init: RequestInit = {

@@ -29,7 +29,7 @@ export async function generateReply(input: GenerateReplyInput, signal?: AbortSig
     const text = await resp.text();
     throw new Error(text || 'Falha ao gerar resposta com IA');
   }
-  return resp.json();
+  return resp.json() as Promise<GenerateReplyOutput>;
 }
 
 export type GenerateModerationInput = {
@@ -60,5 +60,5 @@ export async function generateModeration(input: GenerateModerationInput, signal?
     const text = await resp.text();
     throw new Error(text || 'Falha ao gerar moderação com IA');
   }
-  return resp.json();
+  return resp.json() as Promise<GenerateModerationOutput>;
 }
