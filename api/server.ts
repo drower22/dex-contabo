@@ -131,6 +131,7 @@ const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation/index');
 const salesHandler = loadHandler('./ifood/sales/index');
 const salesIngestHistoryHandler = loadHandler('./ifood/sales/ingest-history');
 const salesSyncHandler = loadHandler('./ifood/sales/sync');
+const ifoodScheduleJobsCronHandler = loadHandler('./cron/ifood-schedule-jobs');
 console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
 if (salesSyncHandler) {
   console.log('🔍 DEBUG exports:', Object.keys(salesSyncHandler));
@@ -233,6 +234,16 @@ if (ifoodReconciliationHandler) {
 }
 
 // Cron de refresh de tokens agora é via GitHub Actions + Supabase
+
+// Cron para agendar jobs diários de conciliação iFood (usado via CRON_SECRET no Contabo)
+if (ifoodScheduleJobsCronHandler) {
+  app.post('/api/cron/ifood-schedule-jobs', adaptVercelHandler(ifoodScheduleJobsCronHandler));
+  console.log('✅ iFood schedule jobs cron handler loaded');
+} else {
+  app.post('/api/cron/ifood-schedule-jobs', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'iFood schedule jobs cron handler not loaded' });
+  });
+}
 
 // Rotas de Sales
 if (salesHandler) {
