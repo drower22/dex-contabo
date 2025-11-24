@@ -103,7 +103,9 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const nowIso = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const jobDay = now.toISOString().slice(0, 10); // YYYY-MM-DD
 
     let conciliationInserted = 0;
     let salesSyncInserted = 0;
@@ -115,13 +117,14 @@ export default async function handler(req: any, res: any) {
         merchant_id: row.merchant_id,
         competence,
         scheduled_for: nowIso,
+        job_day: jobDay,
         status: 'pending',
       }));
 
       const { error: insertError } = await supabase
         .from('ifood_jobs')
         .upsert(conciliationJobsPayload, {
-          onConflict: 'job_type,account_id,competence',
+          onConflict: 'job_type,account_id,competence,job_day',
           ignoreDuplicates: true,
         });
 
