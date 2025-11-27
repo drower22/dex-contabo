@@ -45,19 +45,35 @@
 import type { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
-import axios from 'axios';
 
-const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || 'https://merchant-api.ifood.com.br').trim();
-const IFOOD_PROXY_BASE = process.env.IFOOD_PROXY_BASE?.trim();
-const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY?.trim();
+const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const IFOOD_PROXY_BASE = process.env.IFOOD_PROXY_BASE || 'https://proxy.usa-dex.com.br/api/ifood-proxy';
+const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY;
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+/**
+ * Obter token do iFood via Edge Function (mesmo padrão do sales)
+ */
+async function getIfoodToken(accountId: string): Promise<string> {
+  console.log('🔑 [settlements-test] Obtendo token para accountId:', accountId);
+  
+  const { data, error } = await supabase.functions.invoke('ifood-get-token', {
+    body: { storeId: accountId, scope: 'financial' }
+  });
+
+  if (error || !data?.access_token) {
+    console.error('❌ [settlements-test] Erro ao obter token:', error);
+    throw new Error('Erro ao obter token do iFood');
+  }
+
+  console.log('✅ [settlements-test] Token obtido com sucesso');
+  return data.access_token;
+}
 
 export default async function handler(req: Request, res: Response) {
   const traceId = randomUUID();
-
-  const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
 
   try {
     if (req.method !== 'POST') {
@@ -80,19 +96,14 @@ export default async function handler(req: Request, res: Response) {
       date_range: { startDate, endDate }
     });
 
-    // 1. Buscar token OAuth
-    const { data: authData, error: authError } = await supabase
-      .from('ifood_oauth_tokens')
-      .select('access_token, scope')
-      .eq('account_id', accountId)
-      .eq('merchant_id', merchantId)
-      .eq('scope', 'financial')
-      .single();
-
-    if (authError || !authData?.access_token) {
-      console.error('[settlements-test] ❌ Token não encontrado', { 
+    // 1. Buscar token via Edge Function (mesmo padrão do sales)
+    let token: string;
+    try {
+      token = await getIfoodToken(accountId);
+    } catch (error: any) {
+      console.error('[settlements-test] ❌ Erro ao obter token', { 
         trace_id: traceId,
-        error: authError?.message 
+        error: error.message 
       });
       
       return res.status(401).json({
@@ -103,7 +114,7 @@ export default async function handler(req: Request, res: Response) {
       });
     }
 
-    console.log('[settlements-test] ✅ Token encontrado, scope:', authData.scope);
+    console.log('[settlements-test] ✅ Token obtido com sucesso');
 
     // 2. Testar endpoint oficial da documentação
     // Ref: https://developer.ifood.com.br/pt-BR/docs/guides/modules/financial/api-settlement/
@@ -130,47 +141,65 @@ export default async function handler(req: Request, res: Response) {
       try {
         console.log(`[settlements-test] 🔍 Testando: ${endpoint.name} - ${endpoint.url}`);
         
-        const fullUrl = `${IFOOD_BASE_URL}${endpoint.url}`;
-        let apiResponse;
+        // Construir query string
+        const queryParams = new URLSearchParams(endpoint.params as any).toString();
+        const path = `${endpoint.url}?${queryParams}`;
+        const proxyUrl = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(path)}`;
+        
+        console.log(`[settlements-test] URL proxy:`, proxyUrl);
+        console.log(`[settlements-test] Path iFood:`, path);
 
-        if (IFOOD_PROXY_BASE && IFOOD_PROXY_KEY) {
-          console.log('[settlements-test] Usando proxy...');
-          apiResponse = await axios.get(`${IFOOD_PROXY_BASE}${endpoint.url}`, {
+        // Usar fetch com proxy (mesmo padrão do sales)
+        const response = await fetch(proxyUrl, {
+          method: 'GET',
+          headers: {
+            'x-shared-key': IFOOD_PROXY_KEY!,
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json'
+          }
+        });
+
+        console.log(`[settlements-test] Response status:`, response.status, response.statusText);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`[settlements-test] ❌ ${endpoint.name} falhou:`, errorText);
+          
+          results.push({
+            endpoint: endpoint.name,
+            url: endpoint.url,
             params: endpoint.params,
-            headers: {
-              'X-Shared-Key': IFOOD_PROXY_KEY,
-              'X-Original-Authorization': `Bearer ${authData.access_token}`
-            },
-            timeout: 30000
+            status: 'error',
+            statusCode: response.status,
+            error: errorText,
+            hint: response.status === 404 
+              ? 'Endpoint não existe ou não está disponível'
+              : response.status === 401
+              ? 'Token inválido ou sem permissão'
+              : response.status === 403
+              ? 'Acesso negado - verifique escopo do token'
+              : 'Erro desconhecido'
           });
-        } else {
-          console.log('[settlements-test] Chamada direta...');
-          apiResponse = await axios.get(fullUrl, {
-            params: endpoint.params,
-            headers: {
-              'Authorization': `Bearer ${authData.access_token}`,
-              'Content-Type': 'application/json'
-            },
-            timeout: 30000
-          });
+          continue;
         }
 
-        const data = apiResponse.data?.data || apiResponse.data || [];
+        const data: any = await response.json();
+        const settlements = data?.settlements || data?.data || data || [];
         
-        console.log(`[settlements-test] ✅ ${endpoint.name}: ${Array.isArray(data) ? data.length : 'N/A'} registros`);
+        console.log(`[settlements-test] ✅ ${endpoint.name}: ${Array.isArray(settlements) ? settlements.length : 'N/A'} registros`);
 
         results.push({
           endpoint: endpoint.name,
           url: endpoint.url,
-          fullUrl,
+          proxyUrl,
           params: endpoint.params,
           status: 'success',
-          statusCode: apiResponse.status,
-          recordCount: Array.isArray(data) ? data.length : null,
-          data: data,
-          headers: apiResponse.headers,
-          sampleRecord: Array.isArray(data) && data.length > 0 ? data[0] : null,
-          fields: Array.isArray(data) && data.length > 0 ? Object.keys(data[0]) : []
+          statusCode: response.status,
+          recordCount: Array.isArray(settlements) ? settlements.length : null,
+          data: settlements,
+          fullResponse: data,
+          sampleRecord: Array.isArray(settlements) && settlements.length > 0 ? settlements[0] : null,
+          fields: Array.isArray(settlements) && settlements.length > 0 ? Object.keys(settlements[0]) : []
         });
 
       } catch (error: any) {
@@ -181,16 +210,8 @@ export default async function handler(req: Request, res: Response) {
           url: endpoint.url,
           params: endpoint.params,
           status: 'error',
-          statusCode: error.response?.status,
           error: error.message,
-          errorDetails: error.response?.data,
-          hint: error.response?.status === 404 
-            ? 'Endpoint não existe ou não está disponível'
-            : error.response?.status === 401
-            ? 'Token inválido ou sem permissão'
-            : error.response?.status === 403
-            ? 'Acesso negado - verifique escopo do token'
-            : 'Erro desconhecido'
+          hint: 'Erro de conexão ou timeout'
         });
       }
     }
