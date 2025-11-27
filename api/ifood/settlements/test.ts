@@ -117,21 +117,16 @@ export default async function handler(req: Request, res: Response) {
     console.log('[settlements-test] ✅ Token obtido com sucesso');
 
     // 2. Testar endpoint oficial da documentação
-    // Ref: https://developer.ifood.com.br/pt-BR/docs/guides/modules/financial/api-settlement/
+    // Ref: https://developer.ifood.com.br/pt-BR/docs/references#financial
+    // GET /merchants/{merchantId}/settlements
     const endpointsToTest = [
       {
-        name: 'Settlements (Oficial)',
-        url: '/financial/v1.0/settlements',
+        name: 'Settlements v3.0 (Oficial)',
+        url: `/financial/v3.0/merchants/${merchantId}/settlements`,
         params: { 
-          merchantId, 
-          beginDate: startDate,  // API usa beginDate/endDate
-          endDate: endDate
+          beginPaymentDate: startDate,  // API usa beginPaymentDate/endPaymentDate
+          endPaymentDate: endDate
         }
-      },
-      {
-        name: 'Payouts Unified (Alternativo)',
-        url: '/financial/v1.0/payouts-unified',
-        params: { merchantId, startDate, endDate }
       }
     ];
 
