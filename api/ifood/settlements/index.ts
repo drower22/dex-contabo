@@ -102,6 +102,134 @@ async function fetchSettlementsForWeek(
 }
 
 /**
+ * Persistir settlements no Supabase (tabela public.ifood_settlement_items)
+ * Cada closingItem vira uma linha na tabela, com os dados principais + raw
+ */
+async function persistSettlementsToSupabase(
+  accountId: string,
+  merchantId: string,
+  settlements: any[],
+  traceId: string,
+): Promise<number> {
+  const rows: any[] = [];
+
+  for (const s of settlements || []) {
+    const startCalcRaw = s?.startDateCalculation ?? s?.startDate ?? null;
+    const endCalcRaw = s?.endDateCalculation ?? s?.endDate ?? null;
+
+    const startCalc = startCalcRaw ? String(startCalcRaw).slice(0, 10) : null;
+    const endCalc = endCalcRaw ? String(endCalcRaw).slice(0, 10) : null;
+
+    const closingItems = Array.isArray(s?.closingItems) ? s.closingItems : [];
+
+    for (const item of closingItems) {
+      if (!item) continue;
+
+      const itemId = (item as any).id != null ? String((item as any).id) : null;
+      if (!itemId) continue;
+
+      const settlementIdRaw =
+        (s as any).settlementId ||
+        (s as any).id ||
+        (item as any).settlementId ||
+        (item as any).idSaldo ||
+        null;
+
+      const settlementId = settlementIdRaw ? String(settlementIdRaw) : `period:${startCalc ?? ''}-${endCalc ?? ''}`;
+
+      const paymentDateRaw = (item as any).paymentDate || (item as any).settlementDate || null;
+      const paymentDate = paymentDateRaw ? String(paymentDateRaw).slice(0, 10) : null;
+
+      const expectedPaymentRaw = (item as any).expectedPaymentDate || null;
+      const expectedPaymentDate = expectedPaymentRaw ? String(expectedPaymentRaw).slice(0, 10) : null;
+
+      const dueDateRaw = (item as any).dueDate || null;
+      const dueDate = dueDateRaw ? String(dueDateRaw).slice(0, 10) : null;
+
+      const accountDetails = (item as any).accountDetails || {};
+      const originDetails = Array.isArray((item as any).originDetails)
+        ? (item as any).originDetails
+        : [];
+
+      const primaryOrigin = originDetails[0] || {};
+
+      const row = {
+        merchant_id: merchantId,
+        account_id: accountId ?? null,
+        settlement_id: settlementId,
+        settlement_type: (item as any).settlementType ?? (item as any).type ?? null,
+        start_date_calculation: startCalc,
+        end_date_calculation: endCalc,
+        expected_payment_date: expectedPaymentDate,
+        source_period_start: startCalc,
+        source_period_end: endCalc,
+        item_id: itemId,
+        transaction_id: (item as any).transactionId ?? null,
+        type: (item as any).type ?? null,
+        status: (item as any).status ?? null,
+        sub_status: (item as any).subStatus ?? (item as any).sub_status ?? null,
+        payment_date: paymentDate,
+        due_date: dueDate,
+        installment: (item as any).installment ?? (item as any).installments ?? null,
+        amount: Number((item as any).amount ?? 0),
+        net_value: Number((item as any).netAmount ?? (item as any).amount ?? 0),
+        fee_value: Number((item as any).feeValue ?? (item as any).feesAmount ?? 0),
+        bank_name: accountDetails.bankName ?? null,
+        bank_code: accountDetails.bankNumber ?? accountDetails.bankCode ?? null,
+        branch_code: accountDetails.branchCode ?? null,
+        account_number: accountDetails.accountNumber ?? null,
+        account_digit: accountDetails.accountDigit ?? null,
+        document_number: accountDetails.documentNumber ?? null,
+        raw: {
+          settlementContext: {
+            startDateCalculation: startCalcRaw,
+            endDateCalculation: endCalcRaw,
+          },
+          closingItem: item,
+          originDetails,
+        },
+      };
+
+      rows.push(row);
+    }
+  }
+
+  if (rows.length === 0) {
+    console.log('[settlements] 💾 Nenhum settlement para salvar no Supabase', {
+      trace_id: traceId,
+    });
+    return 0;
+  }
+
+  console.log('[settlements] 💾 Persistindo settlements no Supabase (ifood_settlement_items)', {
+    trace_id: traceId,
+    rows: rows.length,
+  });
+
+  const { data, error } = await supabase
+    .from('ifood_settlement_items')
+    .upsert(rows, { onConflict: 'merchant_id,settlement_id,item_id' })
+    .select('id');
+
+  if (error) {
+    console.error('[settlements] ❌ Erro ao salvar settlements no Supabase', {
+      trace_id: traceId,
+      error: error.message,
+    });
+    throw new Error(`Erro ao salvar settlements no Supabase: ${error.message}`);
+  }
+
+  const affected = Array.isArray(data) ? data.length : rows.length;
+
+  console.log('[settlements] 💾 Persistência concluída', {
+    trace_id: traceId,
+    inserted_or_updated: affected,
+  });
+
+  return affected;
+}
+
+/**
  * Handler principal
  * POST /api/ifood/settlements
  * 
@@ -260,10 +388,10 @@ export default async function handler(req: Request, res: Response) {
     }
 
     console.log(`[settlements] 📊 Total processado: ${allSettlements.length} settlements em ${weekCount} ${isFullYear ? 'semanas' : 'período(s)'}`);
-
-    // 3. Salvar no banco (TODO: implementar lógica de save)
-    // Por enquanto, apenas retornar sucesso
     
+    // 3. Salvar no banco (Supabase)
+    const dbSavedItems = await persistSettlementsToSupabase(accountId, merchantId, allSettlements, traceId);
+
     // Resposta compatível com o que o botão "Hoje" espera
     const response = {
       success: true,
@@ -271,8 +399,9 @@ export default async function handler(req: Request, res: Response) {
         ? `Ingestão de settlements concluída para ${year}`
         : `Ingestão de settlements concluída para período ${beginPaymentDate} → ${endPaymentDate}`,
       trace_id: traceId,
-      processedItems: allSettlements.length, // Campo esperado pelo botão "Hoje"
+      processedItems: allSettlements.length, // Campo esperado pelo botão "Hoje" (quantidade de objetos settlement da API)
       settlementCount: allSettlements.length, // Campo esperado pelo botão "Hoje"
+      dbSavedItems, // Quantidade de linhas inseridas/atualizadas na tabela ifood_settlements
       summary: {
         type: isFullYear ? 'fullYear' : 'period',
         year: isFullYear ? year : null,
