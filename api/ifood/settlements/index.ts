@@ -48,7 +48,7 @@ async function getIfoodToken(accountId: string): Promise<string> {
 }
 
 /**
- * Buscar settlements de uma semana específica
+ * Buscar settlements de uma semana específica via proxy
  */
 async function fetchSettlementsForWeek(
   token: string,
@@ -67,25 +67,38 @@ async function fetchSettlementsForWeek(
   const path = `/financial/v3.0/merchants/${merchantId}/settlements?${queryParams}`;
   const proxyUrl = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(path)}`;
 
-  console.log(`[settlements] Buscando semana ${beginPaymentDate} a ${endPaymentDate}`);
+  console.log(`[settlements] 🔍 Buscando via proxy: ${beginPaymentDate} → ${endPaymentDate}`);
+  console.log(`[settlements] 🔗 Proxy URL: ${proxyUrl}`);
 
   const response = await fetch(proxyUrl, {
     method: 'GET',
     headers: {
       'x-shared-key': IFOOD_PROXY_KEY!,
       'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json'
+      'Accept': 'application/json',
+      'User-Agent': 'Dex-Settlements/1.0'
     }
   });
 
+  console.log(`[settlements] 📡 Response status: ${response.status} ${response.statusText}`);
+
   if (!response.ok) {
     const errorText = await response.text();
-    console.warn(`[settlements] Erro na semana ${beginPaymentDate}: ${errorText}`);
+    console.error(`[settlements] ❌ Erro na API: ${response.status} - ${errorText}`);
+    
+    // Se for erro 401/403, pode ser problema de token
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`Token inválido ou sem permissão: ${errorText}`);
+    }
+    
     return [];
   }
 
   const data: any = await response.json();
-  return data?.settlements || [];
+  const settlements = data?.settlements || [];
+  
+  console.log(`[settlements] ✅ Recebidos ${settlements.length} settlements`);
+  return settlements;
 }
 
 /**
@@ -146,12 +159,16 @@ export default async function handler(req: Request, res: Response) {
     let token: string;
     if (accessToken) {
       token = accessToken;
-      console.log('[settlements] ✅ Usando token do frontend');
+      console.log(`[settlements] ✅ Usando token do frontend (${accessToken.substring(0, 20)}...)`);
     } else {
       try {
+        console.log('[settlements] 🔑 Buscando token via Edge Function...');
         token = await getIfoodToken(accountId);
       } catch (error: any) {
-        console.error('[settlements] Erro ao obter token', { trace_id: traceId });
+        console.error('[settlements] ❌ Erro ao obter token via Edge Function', { 
+          trace_id: traceId,
+          error: error.message 
+        });
         return res.status(401).json({
           error: 'OAuth token not found',
           message: 'Please authenticate with iFood first',
