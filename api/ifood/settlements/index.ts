@@ -128,16 +128,28 @@ export default async function handler(req: Request, res: Response) {
       fullYear, 
       year, 
       merchantId, 
-      accountId, 
+      accountId: rawAccountId, 
+      storeId,
       beginPaymentDate, 
       endPaymentDate,
       accessToken // Pode vir do frontend
     } = req.body;
 
+    // Compatibilidade: aceitar tanto `accountId` quanto `storeId` vindo do frontend
+    const accountId = rawAccountId || storeId;
+
     if (!ingest || !merchantId || !accountId) {
+      console.warn('[settlements] ⚠️ Missing required parameters', {
+        trace_id: traceId,
+        ingest,
+        merchantId,
+        accountId,
+        storeId,
+      });
+
       return res.status(400).json({
         error: 'Missing required parameters',
-        message: 'ingest, merchantId, and accountId are required'
+        message: 'ingest, merchantId, and accountId (ou storeId) são obrigatórios'
       });
     }
 
@@ -158,7 +170,8 @@ export default async function handler(req: Request, res: Response) {
       year: isFullYear ? year : null,
       period: isPeriod ? `${beginPaymentDate} → ${endPaymentDate}` : null,
       merchant_id: merchantId,
-      account_id: accountId
+      account_id: accountId,
+      store_id: storeId ?? null,
     });
 
     // 1. Buscar token (usar accessToken do frontend se disponível)
@@ -168,7 +181,10 @@ export default async function handler(req: Request, res: Response) {
       console.log(`[settlements] ✅ Usando token do frontend (${accessToken.substring(0, 20)}...)`);
     } else {
       try {
-        console.log('[settlements] 🔑 Buscando token via Edge Function...');
+        console.log('[settlements] 🔑 Buscando token via Edge Function...', {
+          trace_id: traceId,
+          account_id: accountId,
+        });
         token = await getIfoodToken(accountId);
       } catch (error: any) {
         console.error('[settlements] ❌ Erro ao obter token via Edge Function', { 
