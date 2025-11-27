@@ -112,6 +112,12 @@ async function fetchSettlementsForWeek(
 export default async function handler(req: Request, res: Response) {
   const traceId = randomUUID();
 
+  console.log('[settlements] 🚀 Handler iniciado', {
+    method: req.method,
+    body: req.body,
+    trace_id: traceId
+  });
+
   try {
     if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method not allowed' });
