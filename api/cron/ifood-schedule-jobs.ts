@@ -109,6 +109,7 @@ export default async function handler(req: any, res: any) {
 
     let conciliationInserted = 0;
     let salesSyncInserted = 0;
+    let reconciliationStatusInserted = 0;
 
     if (conciliationSchedules.length > 0) {
       const conciliationJobsPayload = conciliationSchedules.map((row: any) => ({
@@ -162,6 +163,35 @@ export default async function handler(req: any, res: any) {
       salesSyncInserted = salesJobsPayload.length;
     }
 
+    // Criar jobs de reconciliation_status para todas as lojas ativas
+    if (baseSchedules.length > 0) {
+      const reconciliationStatusJobsPayload = baseSchedules.map((row: any) => ({
+        job_type: 'reconciliation_status',
+        account_id: row.account_id,
+        merchant_id: row.merchant_id,
+        competence: null, // Jobs de status não são por competência
+        scheduled_for: nowIso,
+        job_day: jobDay,
+        status: 'pending',
+      }));
+
+      const { error: insertReconciliationStatusError } = await supabase
+        .from('ifood_jobs')
+        .upsert(reconciliationStatusJobsPayload, {
+          onConflict: 'job_type,account_id,job_day',
+          ignoreDuplicates: true,
+        });
+
+      if (insertReconciliationStatusError) {
+        // eslint-disable-next-line no-console
+        console.error('[ifood-schedule-jobs] Falha ao criar jobs de reconciliation_status em ifood_jobs:', insertReconciliationStatusError.message);
+        res.status(500).json({ error: 'Failed to upsert reconciliation_status jobs', details: insertReconciliationStatusError.message });
+        return;
+      }
+
+      reconciliationStatusInserted = reconciliationStatusJobsPayload.length;
+    }
+
     res.status(200).json({
       message: 'iFood jobs scheduled',
       competence,
@@ -170,6 +200,7 @@ export default async function handler(req: any, res: any) {
       sales_sync_schedules: salesSyncSchedules.length,
       inserted_conciliation: conciliationInserted,
       inserted_sales_sync: salesSyncInserted,
+      inserted_reconciliation_status: reconciliationStatusInserted,
     });
   } catch (err: any) {
     // eslint-disable-next-line no-console

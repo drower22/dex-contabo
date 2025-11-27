@@ -130,6 +130,7 @@ const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
 const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation/index');
 const salesHandler = loadHandler('./ifood/sales/index');
 const salesSyncHandler = loadHandler('./ifood/sales/sync');
+const settlementsTestHandler = loadHandler('./ifood/settlements/test');
 const ifoodScheduleJobsCronHandler = loadHandler('./cron/ifood-schedule-jobs');
 console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
 if (salesSyncHandler) {
@@ -251,6 +252,16 @@ if (salesHandler) {
 } else {
   app.get('/api/ifood/sales', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Sales handler not loaded' });
+  });
+}
+
+// Rotas de Settlements (Test)
+if (settlementsTestHandler) {
+  app.post('/api/ifood/settlements/test', adaptVercelHandler(settlementsTestHandler));
+  console.log('✅ Settlements test handler loaded');
+} else {
+  app.post('/api/ifood/settlements/test', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Settlements test handler not loaded' });
   });
 }
 
