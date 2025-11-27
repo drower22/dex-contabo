@@ -133,9 +133,15 @@ const salesSyncHandler = loadHandler('./ifood/sales/sync');
 const settlementsHandler = loadHandler('./ifood/settlements/index');
 const settlementsTestHandler = loadHandler('./ifood/settlements/test');
 const ifoodScheduleJobsCronHandler = loadHandler('./cron/ifood-schedule-jobs');
+
+// DEBUG: Verificar carregamento dos handlers
 console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
+console.log('🔍 DEBUG settlementsHandler:', settlementsHandler ? 'LOADED ✅' : 'NULL ❌');
 if (salesSyncHandler) {
-  console.log('🔍 DEBUG exports:', Object.keys(salesSyncHandler));
+  console.log('🔍 DEBUG salesSyncHandler exports:', Object.keys(salesSyncHandler));
+}
+if (settlementsHandler) {
+  console.log('🔍 DEBUG settlementsHandler exports:', Object.keys(settlementsHandler));
 }
 
 // Proxy para iFood usando a função Vercel compartilhada
@@ -275,6 +281,7 @@ if (settlementsTestHandler) {
     res.status(500).json({ error: 'Settlements test handler not loaded' });
   });
 }
+
 
 // Rotas de Sync de Vendas (Sync Direto - sem worker)
 if (salesSyncHandler) {
