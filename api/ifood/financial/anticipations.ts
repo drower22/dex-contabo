@@ -26,6 +26,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
+const IFOOD_PROXY_BASE = process.env.IFOOD_PROXY_BASE?.trim(); // ex: https://proxy.usa-dex.com.br/api/ifood-proxy
+const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY?.trim();
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -95,15 +97,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const merchantId = account.ifood_merchant_id;
 
-    // Chama API iFood para antecipações
+    // Chama API iFood para antecipações via proxy ou direto
     // Endpoint correto: /financial/v3.0/merchants/{merchantId}/anticipations
-    const url = `${IFOOD_BASE_URL}/financial/v3.0/merchants/${merchantId}/anticipations?beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
-    const response = await fetch(url, {
-      headers: {
+    let url: string;
+    let headers: Record<string, string>;
+
+    if (IFOOD_PROXY_BASE && IFOOD_PROXY_KEY) {
+      // Usar proxy (recomendado - evita bloqueio de IP)
+      const path = `financial/v3.0/merchants/${merchantId}/anticipations`;
+      url = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(path)}&beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
+      headers = {
+        'x-shared-key': IFOOD_PROXY_KEY,
+        'x-ifood-token': accessToken,
+        'accept': 'application/json',
+      };
+      console.log('[anticipations] 🔄 Using proxy:', { url: url.replace(IFOOD_PROXY_KEY, '***') });
+    } else {
+      // Fallback: chamada direta (pode ser bloqueada)
+      url = `${IFOOD_BASE_URL}/financial/v3.0/merchants/${merchantId}/anticipations?beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
+      headers = {
         'Authorization': `Bearer ${accessToken}`,
         'accept': 'application/json',
-      },
-    });
+      };
+      console.log('[anticipations] ⚠️  Using direct call (may be blocked):', url);
+    }
+
+    const response = await fetch(url, { headers });
 
     if (!response.ok) {
       const errorText = await response.text();
