@@ -21,9 +21,13 @@ import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import axios from 'axios';
 
+const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || 'https://merchant-api.ifood.com.br').trim();
 const IFOOD_PROXY_BASE = process.env.IFOOD_PROXY_BASE?.trim();
 const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY?.trim();
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 interface AnticipationItem {
   anticipationId: string;
@@ -48,6 +52,21 @@ interface AnticipationItem {
   }>;
 }
 
+async function getIfoodToken(accountId: string): Promise<string> {
+  console.log('🔑 [anticipations-sync] Obtendo token para accountId:', accountId);
+  const { data, error } = await supabase.functions.invoke('ifood-get-token', {
+    body: { storeId: accountId, scope: 'financial' },
+  });
+
+  if (error || !data?.access_token) {
+    console.error('❌ [anticipations-sync] Erro ao obter token:', error);
+    throw new Error('Erro ao obter token do iFood');
+  }
+
+  console.log('✅ [anticipations-sync] Token obtido com sucesso');
+  return data.access_token as string;
+}
+
 /**
  * Handler principal para sincronização de anticipations
  * POST /api/ifood/anticipations/sync
@@ -55,11 +74,6 @@ interface AnticipationItem {
  */
 export default async function handler(req: Request, res: Response) {
   const traceId = randomUUID();
-
-  const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
 
   try {
     if (req.method !== 'POST') {
@@ -81,20 +95,16 @@ export default async function handler(req: Request, res: Response) {
       end_date: endDate
     });
 
-    // 1. Buscar token OAuth para este merchant
-    const { data: authData, error: authError } = await supabase
-      .from('ifood_oauth_tokens')
-      .select('access_token')
-      .eq('account_id', accountId)
-      .eq('merchant_id', merchantId)
-      .eq('scope', 'financial')
-      .single();
-
-    if (authError || !authData?.access_token) {
-      console.error('[anticipations-sync] Token não encontrado', { trace_id: traceId });
+    // 1. Buscar token OAuth para este merchant via Edge Function (mesmo padrão dos settlements)
+    let accessToken: string;
+    try {
+      accessToken = await getIfoodToken(accountId);
+    } catch (error: any) {
+      console.error('[anticipations-sync] Erro ao obter token', { trace_id: traceId });
       return res.status(401).json({
         error: 'OAuth token not found',
-        message: 'Please authenticate with iFood first'
+        message: 'Please authenticate with iFood first',
+        trace_id: traceId,
       });
     }
 
@@ -127,7 +137,7 @@ export default async function handler(req: Request, res: Response) {
         params,
         headers: {
           'x-shared-key': IFOOD_PROXY_KEY!,
-          'Authorization': `Bearer ${authData.access_token}`,
+          'Authorization': `Bearer ${accessToken}`,
           'Accept': 'application/json',
         },
       });
@@ -142,7 +152,7 @@ export default async function handler(req: Request, res: Response) {
       apiResponse = await axios.get(anticipationsUrl, {
         params,
         headers: {
-          'Authorization': `Bearer ${authData.access_token}`,
+          'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
       });
