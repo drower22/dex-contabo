@@ -120,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       url = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(path)}&beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
       headers = {
         'x-shared-key': IFOOD_PROXY_KEY,
-        'x-ifood-token': accessToken,
+        'Authorization': `Bearer ${accessToken}`,
         'accept': 'application/json',
       };
       console.log('[anticipations] 🔄 Using proxy:', { url: url.replace(IFOOD_PROXY_KEY, '***') });
