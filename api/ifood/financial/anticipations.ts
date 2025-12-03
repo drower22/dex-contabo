@@ -116,8 +116,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (IFOOD_PROXY_BASE && IFOOD_PROXY_KEY) {
       // Usar proxy (recomendado - evita bloqueio de IP)
-      const path = `financial/v3.0/merchants/${merchantId}/anticipations`;
-      url = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(path)}&beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
+      // Importante: embutir os parâmetros de data dentro do próprio path, pois o proxydex
+      // apenas repassa o path (com query) para o iFood.
+      const path = `/financial/v3.0/merchants/${merchantId}/anticipations?beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
+      url = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(path)}`;
       headers = {
         'x-shared-key': IFOOD_PROXY_KEY,
         'Authorization': `Bearer ${accessToken}`,
