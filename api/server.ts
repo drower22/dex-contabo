@@ -125,6 +125,8 @@ function loadHandler(modulePath: string) {
 
 // Carregar handlers de APIs do iFood (reorganizados)
 const payoutsUnifiedHandler = loadHandler('./ifood/financial/payouts-unified');
+const payoutsHandler = loadHandler('./ifood/financial/payouts');
+const anticipationsHandler = loadHandler('./ifood/financial/anticipations');
 const reconciliationIngestHandler = loadHandler('./ifood/reconciliation/ingest');
 const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
 const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation/index');
@@ -213,6 +215,24 @@ if (payoutsUnifiedHandler) {
 } else {
   app.get('/api/ifood/financial/payouts-unified', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Payouts unified handler not loaded' });
+  });
+}
+
+if (payoutsHandler) {
+  app.get('/api/ifood/financial/payouts', adaptVercelHandler(payoutsHandler));
+  console.log('✅ Payouts handler loaded');
+} else {
+  app.get('/api/ifood/financial/payouts', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Payouts handler not loaded' });
+  });
+}
+
+if (anticipationsHandler) {
+  app.get('/api/ifood/financial/anticipations', adaptVercelHandler(anticipationsHandler));
+  console.log('✅ Anticipations handler loaded');
+} else {
+  app.get('/api/ifood/financial/anticipations', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Anticipations handler not loaded' });
   });
 }
 
