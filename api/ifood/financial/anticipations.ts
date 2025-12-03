@@ -84,18 +84,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Busca merchantId
-    const { data: account } = await supabase
-      .from('accounts')
-      .select('ifood_merchant_id')
-      .eq('id', accountId)
-      .single();
+    // Busca merchantId a partir da ifood_store_auth (fonte principal)
+    const { data: authStore } = await supabase
+      .from('ifood_store_auth')
+      .select('merchant_id')
+      .eq('account_id', accountId)
+      .eq('scope', 'financial')
+      .maybeSingle();
 
-    if (!account?.ifood_merchant_id) {
-      return res.status(404).json({ error: 'Merchant ID not found for this account' });
+    let merchantId = authStore?.merchant_id as string | undefined;
+
+    // Fallback: se não houver merchant_id em ifood_store_auth, tentar na tabela accounts
+    if (!merchantId) {
+      const { data: account } = await supabase
+        .from('accounts')
+        .select('ifood_merchant_id')
+        .eq('id', accountId)
+        .single();
+
+      if (!account?.ifood_merchant_id) {
+        return res.status(404).json({ error: 'Merchant ID not found for this account' });
+      }
+
+      merchantId = account.ifood_merchant_id as string;
     }
-
-    const merchantId = account.ifood_merchant_id;
 
     // Chama API iFood para antecipações via proxy ou direto
     // Endpoint correto: /financial/v3.0/merchants/{merchantId}/anticipations
