@@ -135,6 +135,7 @@ const salesSyncHandler = loadHandler('./ifood/sales/sync');
 const settlementsHandler = loadHandler('./ifood/settlements/index');
 const settlementsTestHandler = loadHandler('./ifood/settlements/test');
 const ifoodScheduleJobsCronHandler = loadHandler('./cron/ifood-schedule-jobs');
+const anticipationsSyncHandler = loadHandler('./ifood/anticipations/sync');
 
 // DEBUG: Verificar carregamento dos handlers
 console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
@@ -299,6 +300,16 @@ if (settlementsTestHandler) {
 } else {
   app.post('/api/ifood/settlements/test', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Settlements test handler not loaded' });
+  });
+}
+
+// Rotas de Antecipações (Sync)
+if (anticipationsSyncHandler) {
+  app.post('/api/ifood/anticipations/sync', anticipationsSyncHandler);
+  console.log('✅ Anticipations sync handler loaded');
+} else {
+  app.post('/api/ifood/anticipations/sync', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Anticipations sync handler not loaded' });
   });
 }
 
