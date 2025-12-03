@@ -42,6 +42,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
+const IFOOD_PROXY_BASE = process.env.IFOOD_PROXY_BASE?.trim(); // ex: https://proxy.usa-dex.com.br/api/ifood-proxy
+const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY?.trim();
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -113,32 +115,90 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const merchantId = account.ifood_merchant_id;
 
-    // 3. Busca settlements da API iFood
-    const settlementsUrl = `${IFOOD_BASE_URL}/financial/v3/settlements?merchantId=${merchantId}&beginPaymentDate=${from}&endPaymentDate=${to}`;
-    const settlementsResponse = await fetch(settlementsUrl, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'accept': 'application/json',
-      },
-    });
+    // 3. Montar chamadas via proxydex (ou fallback direto se não configurado)
+    // Settlements: /financial/v3.0/merchants/{merchantId}/settlements?beginPaymentDate=...&endPaymentDate=...
+    // Anticipations: /financial/v3.0/merchants/{merchantId}/anticipations?beginAnticipatedPaymentDate=...&endAnticipatedPaymentDate=...
 
-    let settlementsData = null;
-    if (settlementsResponse.ok) {
-      settlementsData = await settlementsResponse.json();
-    }
+    const settlementsQuery = new URLSearchParams({
+      beginPaymentDate: from,
+      endPaymentDate: to,
+    }).toString();
+    const settlementsPath = `/financial/v3.0/merchants/${merchantId}/settlements?${settlementsQuery}`;
 
-    // 4. Busca antecipações da API iFood (Financial v3.0)
-    const anticipationsUrl = `${IFOOD_BASE_URL}/financial/v3.0/merchants/${merchantId}/anticipations?beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
-    const anticipationsResponse = await fetch(anticipationsUrl, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'accept': 'application/json',
-      },
-    });
+    const anticipationsQuery = new URLSearchParams({
+      beginAnticipatedPaymentDate: from,
+      endAnticipatedPaymentDate: to,
+    }).toString();
+    const anticipationsPath = `/financial/v3.0/merchants/${merchantId}/anticipations?${anticipationsQuery}`;
 
-    let anticipationsData = null;
-    if (anticipationsResponse.ok) {
-      anticipationsData = await anticipationsResponse.json();
+    let settlementsData: any = null;
+    let anticipationsData: any = null;
+
+    if (IFOOD_PROXY_BASE && IFOOD_PROXY_KEY) {
+      // Usar proxydex (Vercel) para ambas as chamadas
+      const settlementsUrl = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(settlementsPath)}`;
+      const anticipationsUrl = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(anticipationsPath)}`;
+
+      console.log('[payouts] 🔄 Using proxy for settlements:', settlementsUrl);
+      console.log('[payouts] 🔄 Using proxy for anticipations:', anticipationsUrl.replace(IFOOD_PROXY_KEY, '***'));
+
+      const [settlementsResponse, anticipationsResponse] = await Promise.all([
+        fetch(settlementsUrl, {
+          method: 'GET',
+          headers: {
+            'x-shared-key': IFOOD_PROXY_KEY,
+            'Authorization': `Bearer ${accessToken}`,
+            'accept': 'application/json',
+          },
+        }),
+        fetch(anticipationsUrl, {
+          method: 'GET',
+          headers: {
+            'x-shared-key': IFOOD_PROXY_KEY,
+            'Authorization': `Bearer ${accessToken}`,
+            'accept': 'application/json',
+          },
+        }),
+      ]);
+
+      if (settlementsResponse.ok) {
+        settlementsData = await settlementsResponse.json();
+      } else {
+        const txt = await settlementsResponse.text();
+        console.error('[payouts] ❌ Settlements via proxy failed:', settlementsResponse.status, txt);
+      }
+
+      if (anticipationsResponse.ok) {
+        anticipationsData = await anticipationsResponse.json();
+      } else {
+        const txt = await anticipationsResponse.text();
+        console.error('[payouts] ❌ Anticipations via proxy failed:', anticipationsResponse.status, txt);
+      }
+    } else {
+      // Fallback: chamada direta (não recomendada em produção)
+      const settlementsUrl = `${IFOOD_BASE_URL}${settlementsPath}`;
+      const settlementsResponse = await fetch(settlementsUrl, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'accept': 'application/json',
+        },
+      });
+
+      if (settlementsResponse.ok) {
+        settlementsData = await settlementsResponse.json();
+      }
+
+      const anticipationsUrl = `${IFOOD_BASE_URL}${anticipationsPath}`;
+      const anticipationsResponse = await fetch(anticipationsUrl, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'accept': 'application/json',
+        },
+      });
+
+      if (anticipationsResponse.ok) {
+        anticipationsData = await anticipationsResponse.json();
+      }
     }
 
     // 5. Retorna os dados brutos das duas APIs

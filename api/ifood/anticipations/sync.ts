@@ -10,8 +10,8 @@
  * 5. Relaciona antecipações com pedidos (order_ids)
  * 
  * API Reference:
- * GET /financial/v1.0/anticipations
- * Query params: startDate, endDate, merchantId
+ * GET /financial/v3.0/merchants/{merchantId}/anticipations
+ * Query params (iFood): beginAnticipatedPaymentDate, endAnticipatedPaymentDate
  * 
  * @see https://developer.ifood.com.br/pt-BR/docs/guides/modules/financial/api-anticipations/
  */
@@ -98,38 +98,53 @@ export default async function handler(req: Request, res: Response) {
       });
     }
 
-    // 2. Chamar API de Anticipations
-    const anticipationsUrl = `${IFOOD_BASE_URL}/financial/v1.0/anticipations`;
+    // 2. Chamar API de Anticipations (v3.0 merchants) via proxydex
+    const ifoodPath = `/financial/v3.0/merchants/${merchantId}/anticipations`;
     const params = {
-      merchantId,
-      startDate, // YYYY-MM-DD
-      endDate    // YYYY-MM-DD
-    };
+      beginAnticipatedPaymentDate: startDate,
+      endAnticipatedPaymentDate: endDate,
+    } as const;
 
-    console.log(`[anticipations-sync] Chamando API: ${anticipationsUrl}`, {
+    console.log(`[anticipations-sync] Chamando API de anticipations`, {
       trace_id: traceId,
-      params
+      path: ifoodPath,
+      params,
     });
 
     let apiResponse;
-    
+
     if (IFOOD_PROXY_BASE && IFOOD_PROXY_KEY) {
-      // Usar proxy se configurado
-      apiResponse = await axios.get(`${IFOOD_PROXY_BASE}/financial/v1.0/anticipations`, {
+      // Usar proxydex em Vercel (padrão path + x-shared-key)
+      const proxyUrl = new URL(IFOOD_PROXY_BASE);
+      proxyUrl.searchParams.set('path', ifoodPath);
+
+      console.log('[anticipations-sync] 🔄 Using proxy:', {
+        url: proxyUrl.toString(),
+        trace_id: traceId,
+      });
+
+      apiResponse = await axios.get(proxyUrl.toString(), {
         params,
         headers: {
-          'X-Shared-Key': IFOOD_PROXY_KEY,
-          'X-Original-Authorization': `Bearer ${authData.access_token}`
-        }
+          'x-shared-key': IFOOD_PROXY_KEY!,
+          'Authorization': `Bearer ${authData.access_token}`,
+          'Accept': 'application/json',
+        },
       });
     } else {
-      // Chamada direta
+      // Fallback: chamada direta para o iFood
+      const anticipationsUrl = `${IFOOD_BASE_URL}${ifoodPath}`;
+      console.log('[anticipations-sync] ⚠️ Using direct call:', {
+        url: anticipationsUrl,
+        trace_id: traceId,
+      });
+
       apiResponse = await axios.get(anticipationsUrl, {
         params,
         headers: {
           'Authorization': `Bearer ${authData.access_token}`,
-          'Content-Type': 'application/json'
-        }
+          'Content-Type': 'application/json',
+        },
       });
     }
 
