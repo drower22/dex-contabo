@@ -52,18 +52,43 @@ interface AnticipationItem {
   }>;
 }
 
-async function getIfoodToken(accountId: string): Promise<string> {
-  console.log('🔑 [anticipations-sync] Obtendo token para accountId:', accountId);
+async function getIfoodToken(accountId: string, traceId: string): Promise<string> {
+  console.log('🔑 [anticipations-sync] Obtendo token para accountId (Edge Function ifood-get-token):', {
+    trace_id: traceId,
+    accountId,
+    scope: 'financial',
+  });
+
   const { data, error } = await supabase.functions.invoke('ifood-get-token', {
     body: { storeId: accountId, scope: 'financial' },
   });
 
+  console.log('[anticipations-sync] ifood-get-token result', {
+    trace_id: traceId,
+    accountId,
+    scope: 'financial',
+    hasError: !!error,
+    errorMessage: (error as any)?.message ?? null,
+    dataKeys: data ? Object.keys(data) : null,
+  });
+
   if (error || !data?.access_token) {
-    console.error('❌ [anticipations-sync] Erro ao obter token:', error);
+    console.error('❌ [anticipations-sync] Erro ao obter token ou access_token ausente', {
+      trace_id: traceId,
+      accountId,
+      scope: 'financial',
+      error,
+      dataPreview: data ? { ...data, access_token: data.access_token ? '[REDACTED]' : undefined } : null,
+    });
     throw new Error('Erro ao obter token do iFood');
   }
 
-  console.log('✅ [anticipations-sync] Token obtido com sucesso');
+  console.log('✅ [anticipations-sync] Token obtido com sucesso', {
+    trace_id: traceId,
+    accountId,
+    scope: 'financial',
+  });
+
   return data.access_token as string;
 }
 
@@ -98,7 +123,7 @@ export default async function handler(req: Request, res: Response) {
     // 1. Buscar token OAuth para este merchant via Edge Function (mesmo padrão dos settlements)
     let accessToken: string;
     try {
-      accessToken = await getIfoodToken(accountId);
+      accessToken = await getIfoodToken(accountId, traceId);
     } catch (error: any) {
       console.error('[anticipations-sync] Erro ao obter token', { trace_id: traceId });
       return res.status(401).json({
