@@ -264,36 +264,45 @@ export default async function handler(req: Request, res: Response) {
       });
     }
 
-    // 3. Processar e salvar anticipations
+    // 3. Processar e salvar anticipations (alinhado ao schema final ifood_anticipations)
     const anticipationRecords = anticipations.map(anticipation => ({
       account_id: accountId,
       merchant_id: merchantId,
       anticipation_id: anticipation.anticipationId,
-      balance_id: anticipation.balanceId || null,
-      anticipation_date: anticipation.anticipationDate,
-      original_payment_date: anticipation.originalPaymentDate || null,
-      gross_amount: anticipation.grossAmount || 0,
-      net_amount: anticipation.netAmount || 0,
-      discount_amount: anticipation.discountAmount || 0,
-      discount_rate: anticipation.discountRate || null,
-      bank_account_number: anticipation.bankAccount?.accountNumber || null,
-      bank_account_branch: anticipation.bankAccount?.branch || null,
-      bank_code: anticipation.bankAccount?.bankCode || null,
-      bank_name: anticipation.bankAccount?.bankName || null,
-      status: anticipation.status || 'COMPLETED',
-      anticipation_type: anticipation.anticipationType || null,
-      order_ids: anticipation.orders?.map(o => o.orderId) || [],
-      order_count: anticipation.orders?.length || 0,
-      raw_data: anticipation,
-      synced_at: new Date().toISOString()
+      // Valores financeiros principais
+      original_payment_amount: anticipation.grossAmount ?? 0,
+      fee_percentage: anticipation.discountRate ?? null,
+      fee_amount: anticipation.discountAmount ?? 0,
+      anticipated_payment_amount: anticipation.netAmount ?? 0,
+      net_amount: anticipation.netAmount ?? 0,
+      // Datas
+      anticipation_date: anticipation.anticipationDate ? anticipation.anticipationDate.slice(0, 10) : null,
+      original_payment_date: anticipation.originalPaymentDate ? anticipation.originalPaymentDate.slice(0, 10) : null,
+      // Campos de período (por enquanto usando o range global da chamada)
+      start_date_calculation: startDate,
+      end_date_calculation: endDate,
+      source_period_start: startDate,
+      source_period_end: endDate,
+      // Dados bancários
+      bank_name: anticipation.bankAccount?.bankName ?? null,
+      bank_number: anticipation.bankAccount?.bankCode ?? null,
+      branch_code: anticipation.bankAccount?.branch ?? null,
+      account_number: anticipation.bankAccount?.accountNumber ?? null,
+      account_digit: null,
+      // Metadados
+      status: anticipation.status ?? null,
+      type: anticipation.anticipationType ?? null,
+      order_ids: anticipation.orders?.map(o => o.orderId) ?? [],
+      raw: anticipation,
     }));
 
-    // 4. Upsert no banco (atualiza se já existe)
+    // 4. Upsert no banco (atualiza se já existe) usando o índice único definido no DDL
     const { data: insertedData, error: insertError } = await supabase
       .from('ifood_anticipations')
       .upsert(anticipationRecords, {
-        onConflict: 'account_id,merchant_id,anticipation_id',
-        ignoreDuplicates: false
+        onConflict:
+          'account_id,merchant_id,type,original_payment_date,anticipated_payment_date,original_payment_amount',
+        ignoreDuplicates: false,
       })
       .select('id');
 

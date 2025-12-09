@@ -106,10 +106,12 @@ export default async function handler(req: any, res: any) {
     const now = new Date();
     const nowIso = now.toISOString();
     const jobDay = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const dayOfWeek = now.getUTCDay(); // 0=domingo, 1=segunda, ... (usar UTC para evitar timezone do servidor)
 
     let conciliationInserted = 0;
     let salesSyncInserted = 0;
     let reconciliationStatusInserted = 0;
+    let settlementsWeeklyInserted = 0;
 
     if (conciliationSchedules.length > 0) {
       const conciliationJobsPayload = conciliationSchedules.map((row: any) => ({
@@ -163,6 +165,40 @@ export default async function handler(req: any, res: any) {
       salesSyncInserted = salesJobsPayload.length;
     }
 
+    // Criar jobs semanais de settlements (repasses) toda segunda-feira
+    // Consideramos segunda-feira em UTC para simplificar (ajuste fino pode ser feito via horário do cron)
+    if (dayOfWeek === 1) {
+      const settlementsWeeklySchedules = conciliationSchedules; // usar mesmas lojas da conciliação por padrão
+
+      if (settlementsWeeklySchedules.length > 0) {
+        const settlementsWeeklyJobsPayload = settlementsWeeklySchedules.map((row: any) => ({
+          job_type: 'settlements_weekly',
+          account_id: row.account_id,
+          merchant_id: row.merchant_id,
+          competence: null,
+          scheduled_for: nowIso,
+          job_day: jobDay,
+          status: 'pending',
+        }));
+
+        const { error: insertSettlementsWeeklyError } = await supabase
+          .from('ifood_jobs')
+          .upsert(settlementsWeeklyJobsPayload, {
+            onConflict: 'job_type,account_id,job_day',
+            ignoreDuplicates: true,
+          });
+
+        if (insertSettlementsWeeklyError) {
+          // eslint-disable-next-line no-console
+          console.error('[ifood-schedule-jobs] Falha ao criar jobs de settlements_weekly em ifood_jobs:', insertSettlementsWeeklyError.message);
+          res.status(500).json({ error: 'Failed to upsert settlements_weekly jobs', details: insertSettlementsWeeklyError.message });
+          return;
+        }
+
+        settlementsWeeklyInserted = settlementsWeeklyJobsPayload.length;
+      }
+    }
+
     // Criar jobs de reconciliation_status para todas as lojas ativas
     if (baseSchedules.length > 0) {
       const reconciliationStatusJobsPayload = baseSchedules.map((row: any) => ({
@@ -201,6 +237,8 @@ export default async function handler(req: any, res: any) {
       inserted_conciliation: conciliationInserted,
       inserted_sales_sync: salesSyncInserted,
       inserted_reconciliation_status: reconciliationStatusInserted,
+      inserted_settlements_weekly: settlementsWeeklyInserted,
+      is_monday_utc: dayOfWeek === 1,
     });
   } catch (err: any) {
     // eslint-disable-next-line no-console
