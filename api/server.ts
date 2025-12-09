@@ -130,6 +130,7 @@ const financialBuildSummaryHandler = loadHandler('./ifood/financial/build-summar
 const anticipationsHandler = loadHandler('./ifood/financial/anticipations');
 const reconciliationIngestHandler = loadHandler('./ifood/reconciliation/ingest');
 const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
+const reconciliationCalculateStatusHandler = loadHandler('./ifood/reconciliation/calculate-status');
 const ifoodReconciliationHandler = loadHandler('./ifood/reconciliation/index');
 const salesHandler = loadHandler('./ifood/sales/index');
 const salesSyncHandler = loadHandler('./ifood/sales/sync');
@@ -269,6 +270,16 @@ if (ifoodReconciliationHandler) {
 } else {
   app.all('/api/ifood/reconciliation', (req: Request, res: Response) => {
     res.status(500).json({ error: 'iFood reconciliation handler not loaded' });
+  });
+}
+
+// Cálculo de status de conciliação pedido-a-pedido
+if (reconciliationCalculateStatusHandler) {
+  app.post('/api/ifood/reconciliation/calculate-status', adaptVercelHandler(reconciliationCalculateStatusHandler));
+  console.log('✅ Reconciliation calculate-status handler loaded');
+} else {
+  app.post('/api/ifood/reconciliation/calculate-status', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Reconciliation calculate-status handler not loaded' });
   });
 }
 
