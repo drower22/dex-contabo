@@ -265,36 +265,62 @@ export default async function handler(req: Request, res: Response) {
     }
 
     // 3. Processar e salvar anticipations (alinhado ao schema final ifood_anticipations)
-    const anticipationRecords = anticipations.map(anticipation => ({
-      account_id: accountId,
-      merchant_id: merchantId,
-      anticipation_id: anticipation.anticipationId,
-      // Valores financeiros principais
-      original_payment_amount: anticipation.grossAmount ?? 0,
-      fee_percentage: anticipation.discountRate ?? null,
-      fee_amount: anticipation.discountAmount ?? 0,
-      anticipated_payment_amount: anticipation.netAmount ?? 0,
-      net_amount: anticipation.netAmount ?? 0,
-      // Datas
-      anticipation_date: anticipation.anticipationDate ? anticipation.anticipationDate.slice(0, 10) : null,
-      original_payment_date: anticipation.originalPaymentDate ? anticipation.originalPaymentDate.slice(0, 10) : null,
-      // Campos de período (por enquanto usando o range global da chamada)
-      start_date_calculation: startDate,
-      end_date_calculation: endDate,
-      source_period_start: startDate,
-      source_period_end: endDate,
-      // Dados bancários
-      bank_name: anticipation.bankAccount?.bankName ?? null,
-      bank_number: anticipation.bankAccount?.bankCode ?? null,
-      branch_code: anticipation.bankAccount?.branch ?? null,
-      account_number: anticipation.bankAccount?.accountNumber ?? null,
-      account_digit: null,
-      // Metadados
-      status: anticipation.status ?? null,
-      type: anticipation.anticipationType ?? null,
-      order_ids: anticipation.orders?.map(o => o.orderId) ?? [],
-      raw: anticipation,
-    }));
+    // A resposta real do iFood traz um objeto com `closingItems` dentro.
+    // Cada item de closingItems representa uma antecipação com valores e datas.
+    const anticipationRecords = anticipations.flatMap((anticipation: any) => {
+      const closingItems: any[] = Array.isArray(anticipation?.closingItems)
+        ? anticipation.closingItems
+        : [];
+
+      const startCalc = anticipation?.startDateCalculation ?? startDate;
+      const endCalc = anticipation?.endDateCalculation ?? endDate;
+
+      if (closingItems.length === 0) {
+        return [];
+      }
+
+      return closingItems.map((item: any) => {
+        const accountDetails = item?.accountDetails ?? {};
+
+        return {
+          account_id: accountId,
+          merchant_id: merchantId,
+          anticipation_id: null,
+          // Valores financeiros principais
+          original_payment_amount: item?.originalPaymentAmount ?? 0,
+          fee_percentage: item?.feePercentage ?? null,
+          fee_amount: item?.feeAmount ?? 0,
+          anticipated_payment_amount: item?.anticipatedPaymentAmount ?? 0,
+          net_amount: item?.anticipatedPaymentAmount ?? 0,
+          // Datas
+          anticipation_date: item?.anticipatedPaymentDate
+            ? String(item.anticipatedPaymentDate).slice(0, 10)
+            : null,
+          original_payment_date: item?.originalPaymentDate
+            ? String(item.originalPaymentDate).slice(0, 10)
+            : null,
+          // Campos de período (usar informações do bloco de closingItems + range global)
+          start_date_calculation: startCalc,
+          end_date_calculation: endCalc,
+          source_period_start: startDate,
+          source_period_end: endDate,
+          // Dados bancários
+          bank_name: accountDetails?.bankName ?? null,
+          bank_number: accountDetails?.bankNumber ?? null,
+          branch_code: accountDetails?.branchCode ?? null,
+          account_number: accountDetails?.accountNumber ?? null,
+          account_digit: accountDetails?.accountDigit ?? null,
+          // Metadados
+          status: item?.status ?? null,
+          type: item?.type ?? null,
+          order_ids: [],
+          raw: {
+            ...anticipation,
+            closingItem: item,
+          },
+        };
+      });
+    });
 
     // 4. Upsert no banco (atualiza se já existe) usando o índice único definido no DDL
     const { data: insertedData, error: insertError } = await supabase
