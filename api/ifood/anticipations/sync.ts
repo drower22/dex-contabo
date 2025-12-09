@@ -201,7 +201,17 @@ export default async function handler(req: Request, res: Response) {
           });
         }
 
-        const windowData: AnticipationItem[] = apiResponse.data?.data || apiResponse.data?.anticipations || apiResponse.data || [];
+        // A API do iFood retorna um objeto com "settlements" neste endpoint de anticipations:
+        // {
+        //   beginDate, endDate, balance, merchantId, settlements: [...]
+        // }
+        const windowData: AnticipationItem[] =
+          apiResponse.data?.settlements ||
+          apiResponse.data?.data ||
+          apiResponse.data?.anticipations ||
+          apiResponse.data ||
+          [];
+
         console.log('[anticipations-sync] Janela processada com sucesso', {
           trace_id: traceId,
           begin: windowParams.beginAnticipatedPaymentDate,
