@@ -9,7 +9,7 @@
  * }
  */
 
-import { NextApiRequest, NextApiResponse } from 'next';
+import type { Request, Response } from 'express';
 import { IfoodReconciliationCalculator } from '../../../services/ifood-reconciliation-calculator';
 
 interface RequestBody {
@@ -17,7 +17,7 @@ interface RequestBody {
   merchantId: string;
 }
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: Request, res: Response) {
   // Verificar método HTTP
   if (req.method !== 'POST') {
     return res.status(405).json({ 
