@@ -126,6 +126,7 @@ function loadHandler(modulePath: string) {
 // Carregar handlers de APIs do iFood (reorganizados)
 const payoutsUnifiedHandler = loadHandler('./ifood/financial/payouts-unified');
 const payoutsHandler = loadHandler('./ifood/financial/payouts');
+const financialBuildSummaryHandler = loadHandler('./ifood/financial/build-summary');
 const anticipationsHandler = loadHandler('./ifood/financial/anticipations');
 const reconciliationIngestHandler = loadHandler('./ifood/reconciliation/ingest');
 const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
@@ -225,6 +226,16 @@ if (payoutsHandler) {
 } else {
   app.get('/api/ifood/financial/payouts', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Payouts handler not loaded' });
+  });
+}
+
+if (financialBuildSummaryHandler) {
+  app.post('/api/ifood/financial/build-summary', adaptVercelHandler(financialBuildSummaryHandler));
+  app.get('/api/ifood/financial/build-summary', adaptVercelHandler(financialBuildSummaryHandler));
+  console.log('✅ Financial build-summary handler loaded');
+} else {
+  app.all('/api/ifood/financial/build-summary', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Financial build-summary handler not loaded' });
   });
 }
 
