@@ -133,59 +133,112 @@ export default async function handler(req: Request, res: Response) {
       });
     }
 
-    // 2. Chamar API de Anticipations (v3.0 merchants) via proxydex
+    // 2. Chamar API de Anticipations (v3.0 merchants) em janelas de até 30 dias
     const ifoodPath = `/financial/v3.0/merchants/${merchantId}/anticipations`;
-    const params = {
-      beginAnticipatedPaymentDate: startDate,
-      endAnticipatedPaymentDate: endDate,
-    } as const;
 
-    console.log(`[anticipations-sync] Chamando API de anticipations`, {
-      trace_id: traceId,
-      path: ifoodPath,
-      params,
-    });
+    const allAnticipations: AnticipationItem[] = [];
 
-    let apiResponse;
+    const start = new Date(startDate);
+    const end = new Date(endDate);
 
-    if (IFOOD_PROXY_BASE && IFOOD_PROXY_KEY) {
-      // Usar proxydex em Vercel (padrão path + x-shared-key)
-      const proxyUrl = new URL(IFOOD_PROXY_BASE);
-      proxyUrl.searchParams.set('path', ifoodPath);
+    let currentStart = new Date(start);
+    while (currentStart <= end) {
+      const windowEnd = new Date(currentStart);
+      windowEnd.setUTCDate(windowEnd.getUTCDate() + 30);
+      if (windowEnd > end) {
+        windowEnd.setTime(end.getTime());
+      }
 
-      console.log('[anticipations-sync] 🔄 Using proxy:', {
-        url: proxyUrl.toString(),
+      const windowParams = {
+        beginAnticipatedPaymentDate: currentStart.toISOString().slice(0, 10),
+        endAnticipatedPaymentDate: windowEnd.toISOString().slice(0, 10),
+      } as const;
+
+      console.log('[anticipations-sync] Chamando API de anticipations (janela)', {
         trace_id: traceId,
+        path: ifoodPath,
+        params: windowParams,
       });
 
-      apiResponse = await axios.get(proxyUrl.toString(), {
-        params,
-        headers: {
-          'x-shared-key': IFOOD_PROXY_KEY!,
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json',
-        },
-      });
-    } else {
-      // Fallback: chamada direta para o iFood
-      const anticipationsUrl = `${IFOOD_BASE_URL}${ifoodPath}`;
-      console.log('[anticipations-sync] ⚠️ Using direct call:', {
-        url: anticipationsUrl,
-        trace_id: traceId,
-      });
+      try {
+        let apiResponse;
 
-      apiResponse = await axios.get(anticipationsUrl, {
-        params,
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
+        if (IFOOD_PROXY_BASE && IFOOD_PROXY_KEY) {
+          // Usar proxydex em Vercel (padrão path + x-shared-key)
+          // Aqui o proxy espera que TODO o path + query sejam enviados em "path".
+          // Ex: path=/financial/.../anticipations?beginAnticipatedPaymentDate=...&endAnticipatedPaymentDate=...
+          const proxyUrl = new URL(IFOOD_PROXY_BASE);
+          const query = new URLSearchParams(windowParams as any).toString();
+          const fullPath = query ? `${ifoodPath}?${query}` : ifoodPath;
+          proxyUrl.searchParams.set('path', fullPath);
+
+          console.log('[anticipations-sync] 🔄 Using proxy:', {
+            url: proxyUrl.toString(),
+            trace_id: traceId,
+          });
+
+          apiResponse = await axios.get(proxyUrl.toString(), {
+            headers: {
+              'x-shared-key': IFOOD_PROXY_KEY!,
+              'Authorization': `Bearer ${accessToken}`,
+              'Accept': 'application/json',
+            },
+          });
+        } else {
+          // Fallback: chamada direta para o iFood
+          const anticipationsUrl = `${IFOOD_BASE_URL}${ifoodPath}`;
+          console.log('[anticipations-sync] ⚠️ Using direct call:', {
+            url: anticipationsUrl,
+            trace_id: traceId,
+          });
+
+          apiResponse = await axios.get(anticipationsUrl, {
+            params: windowParams,
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          });
+        }
+
+        const windowData: AnticipationItem[] = apiResponse.data?.data || apiResponse.data?.anticipations || apiResponse.data || [];
+        console.log('[anticipations-sync] Janela processada com sucesso', {
+          trace_id: traceId,
+          begin: windowParams.beginAnticipatedPaymentDate,
+          end: windowParams.endAnticipatedPaymentDate,
+          count: Array.isArray(windowData) ? windowData.length : 0,
+        });
+
+        if (Array.isArray(windowData) && windowData.length > 0) {
+          allAnticipations.push(...windowData);
+        }
+      } catch (err: any) {
+        const axiosErr = err as any;
+        const status = axiosErr?.response?.status ?? 500;
+        const body = axiosErr?.response?.data ?? axiosErr?.message ?? String(axiosErr);
+        console.error('[anticipations-sync] Erro na API iFood (janela)', {
+          trace_id: traceId,
+          status,
+          body: typeof body === 'string' ? body : JSON.stringify(body).slice(0, 1000),
+        });
+
+        return res.status(status).json({
+          error: 'ifood_anticipations_api_error',
+          message: 'Erro ao chamar API de antecipações do iFood',
+          status,
+          upstream: body,
+          trace_id: traceId,
+        });
+      }
+
+      // Avançar para próxima janela
+      currentStart = new Date(windowEnd);
+      currentStart.setUTCDate(currentStart.getUTCDate() + 1);
     }
 
-    const anticipations: AnticipationItem[] = apiResponse.data?.data || apiResponse.data || [];
+    const anticipations: AnticipationItem[] = allAnticipations;
 
-    console.log(`[anticipations-sync] Recebidas ${anticipations.length} antecipações`, {
+    console.log(`[anticipations-sync] Recebidas ${anticipations.length} antecipações (todas as janelas)`, {
       trace_id: traceId
     });
 
