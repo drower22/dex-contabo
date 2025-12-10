@@ -96,7 +96,7 @@ async function fetchSalesPage(
 }
 
 /**
- * Salvar vendas no Supabase
+ * Salvar vendas no Supabase (em lotes menores para evitar timeouts/erros de rede)
  */
 async function saveSales(sales: any[], accountId: string, merchantId: string) {
   if (sales.length === 0) return 0;
@@ -186,21 +186,44 @@ async function saveSales(sales: any[], accountId: string, merchantId: string) {
     synced_at: new Date().toISOString(),
   }));
 
-  const { error, count } = await supabase
-    .from('ifood_sales')
-    .upsert(transformedSales, {
-      onConflict: 'id',
-      ignoreDuplicates: false,
-      count: 'exact'
-    });
+  const batchSize = 200; // limite de segurança para payload
+  let totalSaved = 0;
 
-  if (error) {
-    console.error('❌ [syncIfoodSales] Erro ao salvar vendas:', error);
-    throw new Error('Erro ao salvar vendas no banco');
+  for (let i = 0; i < transformedSales.length; i += batchSize) {
+    const batch = transformedSales.slice(i, i + batchSize);
+    console.log(`💾 [syncIfoodSales] Upsert de lote ${i / batchSize + 1} com ${batch.length} vendas...`);
+
+    try {
+      const { error, count } = await supabase
+        .from('ifood_sales')
+        .upsert(batch, {
+          onConflict: 'id',
+          ignoreDuplicates: false,
+          count: 'exact'
+        });
+
+      if (error) {
+        console.error('❌ [syncIfoodSales] Erro ao salvar vendas (Supabase retornou erro):', {
+          message: (error as any).message,
+          details: (error as any).details,
+          hint: (error as any).hint,
+          code: (error as any).code,
+        });
+        throw new Error('Erro ao salvar vendas no banco');
+      }
+
+      totalSaved += count ?? batch.length;
+    } catch (e: any) {
+      console.error('❌ [syncIfoodSales] Exceção ao chamar Supabase (possível fetch failed):', {
+        message: e?.message,
+        stack: e?.stack,
+      });
+      throw new Error('Erro ao salvar vendas no banco');
+    }
   }
 
-  console.log(`✅ [syncIfoodSales] ${count || sales.length} vendas salvas`);
-  return count || sales.length;
+  console.log(`✅ [syncIfoodSales] ${totalSaved} vendas salvas (em lotes)`);
+  return totalSaved;
 }
 
 export async function syncIfoodSales(req: Request, res: Response) {
