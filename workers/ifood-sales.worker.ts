@@ -2,6 +2,7 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
+import { ifoodRateLimiter } from './utils/rate-limiter';
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
@@ -273,13 +274,15 @@ async function processSalesSyncJob(job: IfoodJob) {
       url,
     });
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+    const response = await ifoodRateLimiter.execute(() =>
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+    );
 
     const responseText = await response.text();
     let parsed: any = {};

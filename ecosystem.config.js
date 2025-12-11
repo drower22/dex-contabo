@@ -54,6 +54,31 @@ module.exports = {
       max_memory_restart: '1G',
     },
 
+    // Worker Scheduler - Cria jobs automáticos na fila (settlements + anticipations)
+    {
+      name: 'ifood-scheduler_worker',
+      script: './node_modules/.bin/ts-node',
+      args: 'workers/ifood-scheduler.worker.ts',
+      cwd: '/home/dex/dex-app',
+      interpreter: 'none',
+      instances: 1,
+      exec_mode: 'fork',
+      env_file: '.env',
+      env: {
+        NODE_ENV: 'production',
+      },
+      error_file: './logs/worker-scheduler-error.log',
+      out_file: './logs/worker-scheduler-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      merge_logs: true,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '256M',
+      restart_delay: 5000,
+      max_restarts: 10,
+      min_uptime: '10s',
+    },
+
     // Worker de Sync de Vendas iFood (fila ifood_jobs)
     {
       name: 'ifood-sales_worker',
@@ -67,7 +92,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         DEX_API_BASE_URL: 'http://localhost:3000',
-        IFOOD_WORKER_MAX_CONCURRENCY: '5',
+        IFOOD_WORKER_MAX_CONCURRENCY: '20',
         IFOOD_WORKER_POLL_INTERVAL_MS: '10000',
         IFOOD_WORKER_MAX_ATTEMPTS: '3',
       },
@@ -83,34 +108,6 @@ module.exports = {
       min_uptime: '10s',
     },
 
-    // Worker de Jobs de Conciliação iFood (fila ifood_jobs)
-    {
-      name: 'ifood-conciliation_worker',
-      script: './node_modules/.bin/ts-node',
-      args: 'workers/ifood-conciliation.worker.ts',
-      cwd: '/home/dex/dex-app',
-      interpreter: 'none',
-      instances: 1,
-      exec_mode: 'fork',
-      env_file: '.env',
-      env: {
-        NODE_ENV: 'production',
-        DEX_API_BASE_URL: 'http://localhost:3000',
-        IFOOD_WORKER_MAX_CONCURRENCY: '5',
-        IFOOD_WORKER_POLL_INTERVAL_MS: '10000',
-        IFOOD_WORKER_MAX_ATTEMPTS: '3',
-      },
-      error_file: './logs/worker-ifood-error.log',
-      out_file: './logs/worker-ifood-out.log',
-      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-      merge_logs: true,
-      autorestart: true,
-      watch: false,
-      max_memory_restart: '512M',
-      restart_delay: 5000,
-      max_restarts: 10,
-      min_uptime: '10s',
-    },
 
     // Worker de Repasses Semanais iFood (fila ifood_jobs, job_type = settlements_weekly)
     {
@@ -125,7 +122,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         DEX_API_BASE_URL: 'http://localhost:3000',
-        IFOOD_WORKER_MAX_CONCURRENCY: '5',
+        IFOOD_WORKER_MAX_CONCURRENCY: '20',
         IFOOD_WORKER_POLL_INTERVAL_MS: '10000',
         IFOOD_WORKER_MAX_ATTEMPTS: '3',
       },
@@ -141,11 +138,11 @@ module.exports = {
       min_uptime: '10s',
     },
 
-    // Worker de Status de Conciliação iFood (fila ifood_jobs)
+    // Worker de Antecipações iFood (fila ifood_jobs, job_type = anticipations_daily)
     {
-      name: 'ifood-reconciliation-status_worker',
+      name: 'ifood-anticipations_worker',
       script: './node_modules/.bin/ts-node',
-      args: 'workers/ifood-reconciliation-status.worker.ts',
+      args: 'workers/ifood-anticipations.worker.ts',
       cwd: '/home/dex/dex-app',
       interpreter: 'none',
       instances: 1,
@@ -154,12 +151,12 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         DEX_API_BASE_URL: 'http://localhost:3000',
-        IFOOD_WORKER_MAX_CONCURRENCY: '5',
+        IFOOD_WORKER_MAX_CONCURRENCY: '20',
         IFOOD_WORKER_POLL_INTERVAL_MS: '10000',
         IFOOD_WORKER_MAX_ATTEMPTS: '3',
       },
-      error_file: './logs/worker-reconciliation-status-error.log',
-      out_file: './logs/worker-reconciliation-status-out.log',
+      error_file: './logs/worker-anticipations-error.log',
+      out_file: './logs/worker-anticipations-out.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
       merge_logs: true,
       autorestart: true,

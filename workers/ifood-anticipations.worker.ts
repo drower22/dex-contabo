@@ -11,7 +11,7 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const DEX_API_BASE_URL = (process.env.DEX_API_BASE_URL || 'http://localhost:3000').trim();
 
-console.log('[ifood-settlements-worker] ENV DEBUG', {
+console.log('[ifood-anticipations-worker] ENV DEBUG', {
   cwd: process.cwd(),
   dirname: __dirname,
   hasSupabaseUrl: !!SUPABASE_URL,
@@ -20,7 +20,7 @@ console.log('[ifood-settlements-worker] ENV DEBUG', {
 });
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('[ifood-settlements-worker] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados. Worker não conseguirá processar jobs.');
+  console.error('[ifood-anticipations-worker] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados. Worker não conseguirá processar jobs.');
 }
 
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -31,7 +31,7 @@ const MAX_CONCURRENCY = Number.parseInt(process.env.IFOOD_WORKER_MAX_CONCURRENCY
 const POLL_INTERVAL_MS = Number.parseInt(process.env.IFOOD_WORKER_POLL_INTERVAL_MS || '10000', 10) || 10000;
 const MAX_ATTEMPTS = Number.parseInt(process.env.IFOOD_WORKER_MAX_ATTEMPTS || '3', 10) || 3;
 
-const WORKER_ID = `ifood-settlements-${randomUUID()}`;
+const WORKER_ID = `ifood-anticipations-${randomUUID()}`;
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -49,35 +49,6 @@ interface IfoodJob {
   next_retry_at: string | null;
 }
 
-function computePreviousWeekRangeFromJobDay(jobDay: string): { beginPaymentDate: string; endPaymentDate: string } {
-  // jobDay em formato YYYY-MM-DD
-  const base = new Date(`${jobDay}T00:00:00Z`);
-
-  if (Number.isNaN(base.getTime())) {
-    throw new Error(`job_day inválido: ${jobDay}`);
-  }
-
-  const dayOfWeek = base.getUTCDay(); // 0=domingo,1=segunda,...
-
-  // Segunda da semana "deste" jobDay
-  const mondayOffsetThisWeek = dayOfWeek === 0 ? -6 : -(dayOfWeek - 1);
-  const mondayThisWeek = new Date(base);
-  mondayThisWeek.setUTCDate(base.getUTCDate() + mondayOffsetThisWeek);
-
-  // Segunda da semana ANTERIOR
-  const mondayPrev = new Date(mondayThisWeek);
-  mondayPrev.setUTCDate(mondayThisWeek.getUTCDate() - 7);
-
-  // Domingo da semana ANTERIOR
-  const sundayPrev = new Date(mondayPrev);
-  sundayPrev.setUTCDate(mondayPrev.getUTCDate() + 6);
-
-  const beginPaymentDate = mondayPrev.toISOString().split('T')[0];
-  const endPaymentDate = sundayPrev.toISOString().split('T')[0];
-
-  return { beginPaymentDate, endPaymentDate };
-}
-
 async function reserveJobs(limit: number): Promise<IfoodJob[]> {
   if (!supabase) return [];
 
@@ -86,7 +57,7 @@ async function reserveJobs(limit: number): Promise<IfoodJob[]> {
   const { data: candidates, error } = await supabase
     .from('ifood_jobs')
     .select('*')
-    .eq('job_type', 'settlements_weekly')
+    .eq('job_type', 'anticipations_daily')
     .eq('status', 'pending')
     .lte('scheduled_for', nowIso)
     .or(`next_retry_at.is.null,next_retry_at.lte.${nowIso}`)
@@ -94,7 +65,7 @@ async function reserveJobs(limit: number): Promise<IfoodJob[]> {
     .limit(limit * 2);
 
   if (error) {
-    console.error('[ifood-settlements-worker] Erro ao buscar jobs pendentes:', error.message);
+    console.error('[ifood-anticipations-worker] Erro ao buscar jobs pendentes:', error.message);
     return [];
   }
 
@@ -121,7 +92,7 @@ async function reserveJobs(limit: number): Promise<IfoodJob[]> {
         reserved.push(updated as IfoodJob);
       }
     } catch (err: any) {
-      console.error('[ifood-settlements-worker] Erro ao reservar job:', err?.message || err);
+      console.error('[ifood-anticipations-worker] Erro ao reservar job:', err?.message || err);
     }
   }
 
@@ -147,7 +118,7 @@ async function markJobSuccess(job: IfoodJob) {
     .eq('id', job.id);
 
   if (error) {
-    console.error('[ifood-settlements-worker] Erro ao marcar job como success:', error.message);
+    console.error('[ifood-anticipations-worker] Erro ao marcar job como success:', error.message);
   }
 }
 
@@ -181,43 +152,28 @@ async function markJobRetry(job: IfoodJob, errorMessage: string) {
     .eq('id', job.id);
 
   if (error) {
-    console.error('[ifood-settlements-worker] Erro ao marcar job como retry/failed:', error.message);
+    console.error('[ifood-anticipations-worker] Erro ao marcar job como retry/failed:', error.message);
   }
 }
 
-async function processSettlementsWeeklyJob(job: IfoodJob) {
+async function processAnticipationsJob(job: IfoodJob) {
   if (!job.account_id || !job.merchant_id) {
     await markJobRetry(job, 'Dados incompletos no job (account_id/merchant_id ausentes).');
     return;
   }
 
-  const jobDay = job.job_day || new Date().toISOString().split('T')[0];
-
-  let range;
-  try {
-    range = computePreviousWeekRangeFromJobDay(jobDay);
-  } catch (err: any) {
-    await markJobRetry(job, `Erro ao calcular semana anterior: ${err?.message || String(err)}`);
-    return;
-  }
-
-  const url = `${DEX_API_BASE_URL}/api/ifood/settlements`;
+  const url = `${DEX_API_BASE_URL}/api/ifood/anticipations/sync`;
   const body = {
     storeId: job.account_id,
     merchantId: job.merchant_id,
-    ingest: true,
-    triggerSource: 'settlements_weekly_job',
-    beginPaymentDate: range.beginPaymentDate,
-    endPaymentDate: range.endPaymentDate,
+    triggerSource: 'anticipations_daily_job',
   };
 
   try {
-    console.log('[ifood-settlements-worker] Disparando ingest de settlements semanais', {
+    console.log('[ifood-anticipations-worker] Disparando sync de antecipações', {
       jobId: job.id,
       accountId: job.account_id,
       merchantId: job.merchant_id,
-      beginPaymentDate: range.beginPaymentDate,
-      endPaymentDate: range.endPaymentDate,
       url,
     });
 
@@ -237,15 +193,14 @@ async function processSettlementsWeeklyJob(job: IfoodJob) {
       try {
         parsed = JSON.parse(text);
       } catch (err: any) {
-        console.warn('[ifood-settlements-worker] Falha ao parsear resposta JSON do endpoint de settlements:', err?.message || err);
+        console.warn('[ifood-anticipations-worker] Falha ao parsear resposta JSON:', err?.message || err);
       }
     }
 
     if (response.ok && parsed && parsed.success) {
-      console.log('[ifood-settlements-worker] Job de settlements concluído com sucesso', {
+      console.log('[ifood-anticipations-worker] Job de antecipações concluído com sucesso', {
         jobId: job.id,
-        processedItems: parsed.processedItems,
-        dbSavedItems: parsed.dbSavedItems,
+        savedCount: parsed.savedCount,
       });
       await markJobSuccess(job);
       return;
@@ -254,7 +209,7 @@ async function processSettlementsWeeklyJob(job: IfoodJob) {
     const errorMessage = `HTTP ${response.status}: ${text.slice(0, 500)}`;
 
     if (response.status >= 400 && response.status < 500) {
-      console.error('[ifood-settlements-worker] Erro não-retryable no ingest de settlements:', {
+      console.error('[ifood-anticipations-worker] Erro não-retryable no sync de antecipações:', {
         jobId: job.id,
         status: response.status,
         body: text.slice(0, 500),
@@ -265,14 +220,14 @@ async function processSettlementsWeeklyJob(job: IfoodJob) {
       return;
     }
 
-    console.warn('[ifood-settlements-worker] Erro retryable no ingest de settlements:', {
+    console.warn('[ifood-anticipations-worker] Erro retryable no sync de antecipações:', {
       jobId: job.id,
       status: response.status,
     });
     await markJobRetry(job, errorMessage);
   } catch (err: any) {
     const message = err?.message || String(err);
-    console.error('[ifood-settlements-worker] Exceção ao processar job de settlements:', {
+    console.error('[ifood-anticipations-worker] Exceção ao processar job de antecipações:', {
       jobId: job.id,
       error: message,
     });
@@ -282,7 +237,7 @@ async function processSettlementsWeeklyJob(job: IfoodJob) {
 
 async function tick() {
   if (!supabase) {
-    console.error('[ifood-settlements-worker] Supabase não inicializado. Aguardando configuração...');
+    console.error('[ifood-anticipations-worker] Supabase não inicializado. Aguardando configuração...');
     await sleep(30_000);
     return;
   }
@@ -293,16 +248,16 @@ async function tick() {
     return;
   }
 
-  console.log('[ifood-settlements-worker] Processando lote de jobs', {
+  console.log('[ifood-anticipations-worker] Processando lote de jobs', {
     count: jobs.length,
     workerId: WORKER_ID,
   });
 
-  await Promise.all(jobs.map((job) => processSettlementsWeeklyJob(job)));
+  await Promise.all(jobs.map((job) => processAnticipationsJob(job)));
 }
 
 async function main() {
-  console.log('[ifood-settlements-worker] Iniciado', {
+  console.log('[ifood-anticipations-worker] Iniciado', {
     workerId: WORKER_ID,
     maxConcurrency: MAX_CONCURRENCY,
     pollIntervalMs: POLL_INTERVAL_MS,
@@ -315,7 +270,7 @@ async function main() {
     try {
       await tick();
     } catch (err: any) {
-      console.error('[ifood-settlements-worker] Erro inesperado no loop principal:', err?.message || err);
+      console.error('[ifood-anticipations-worker] Erro inesperado no loop principal:', err?.message || err);
     }
 
     await sleep(POLL_INTERVAL_MS);
@@ -323,16 +278,16 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('[ifood-settlements-worker] Falha ao iniciar worker:', err?.message || err);
+  console.error('[ifood-anticipations-worker] Falha ao iniciar worker:', err?.message || err);
   process.exit(1);
 });
 
 process.on('SIGTERM', () => {
-  console.log('[ifood-settlements-worker] Recebido SIGTERM, encerrando...');
+  console.log('[ifood-anticipations-worker] Recebido SIGTERM, encerrando...');
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('[ifood-settlements-worker] Recebido SIGINT, encerrando...');
+  console.log('[ifood-anticipations-worker] Recebido SIGINT, encerrando...');
   process.exit(0);
 });
