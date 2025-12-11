@@ -138,6 +138,11 @@ const settlementsHandler = loadHandler('./ifood/settlements/index');
 const settlementsTestHandler = loadHandler('./ifood/settlements/test');
 const ifoodScheduleJobsCronHandler = loadHandler('./cron/ifood-schedule-jobs');
 const anticipationsSyncHandler = loadHandler('./ifood/anticipations/sync');
+// Reviews V2
+const reviewsListHandler = loadHandler('./ifood/reviews/index');
+const reviewsSummaryHandler = loadHandler('./ifood/reviews/summary');
+const reviewsSettingsHandler = loadHandler('./ifood/reviews/settings');
+const reviewsDetailHandler = loadHandler('./ifood/reviews/[reviewId]');
 
 // DEBUG: Verificar carregamento dos handlers
 console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
@@ -332,6 +337,44 @@ if (anticipationsSyncHandler) {
 } else {
   app.post('/api/ifood/anticipations/sync', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Anticipations sync handler not loaded' });
+  });
+}
+
+
+// Rotas de Reviews V2
+if (reviewsListHandler) {
+  app.get('/api/ifood/reviews', adaptVercelHandler(reviewsListHandler));
+  console.log('✅ Reviews list handler loaded');
+} else {
+  app.get('/api/ifood/reviews', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Reviews list handler not loaded' });
+  });
+}
+
+if (reviewsSummaryHandler) {
+  app.get('/api/ifood/reviews/summary', adaptVercelHandler(reviewsSummaryHandler));
+  console.log('✅ Reviews summary handler loaded');
+} else {
+  app.get('/api/ifood/reviews/summary', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Reviews summary handler not loaded' });
+  });
+}
+
+if (reviewsSettingsHandler) {
+  app.all('/api/ifood/reviews/settings', adaptVercelHandler(reviewsSettingsHandler));
+  console.log('✅ Reviews settings handler loaded');
+} else {
+  app.all('/api/ifood/reviews/settings', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Reviews settings handler not loaded' });
+  });
+}
+
+if (reviewsDetailHandler) {
+  app.get('/api/ifood/reviews/:reviewId', adaptVercelHandler(reviewsDetailHandler));
+  console.log('✅ Reviews detail handler loaded');
+} else {
+  app.get('/api/ifood/reviews/:reviewId', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Reviews detail handler not loaded' });
   });
 }
 
