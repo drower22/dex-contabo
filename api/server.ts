@@ -144,6 +144,12 @@ const reviewsSummaryHandler = loadHandler('./ifood/reviews/summary');
 const reviewsSettingsHandler = loadHandler('./ifood/reviews/settings');
 const reviewsDetailHandler = loadHandler('./ifood/reviews/[reviewId]');
 
+// Admin
+const adminIfoodJobsHandler = loadHandler('./admin/ifood/jobs');
+const adminLogsHandler = loadHandler('./admin/logs');
+const adminIfoodJobsRetryHandler = loadHandler('./admin/ifood/jobs-retry');
+const adminIfoodJobsRunNowHandler = loadHandler('./admin/ifood/jobs-run-now');
+
 // DEBUG: Verificar carregamento dos handlers
 console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
 console.log('🔍 DEBUG settlementsHandler:', settlementsHandler ? 'LOADED ✅' : 'NULL ❌');
@@ -210,6 +216,45 @@ app.all('/api/ifood-proxy', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'proxy_failure', message: err?.message || String(err) });
   }
 });
+
+// ============================================
+// ROTAS ADMIN (Painel ADM)
+// ============================================
+if (adminIfoodJobsHandler) {
+  app.get('/api/admin/ifood/jobs', adaptVercelHandler(adminIfoodJobsHandler));
+  console.log('✅ Admin iFood jobs handler loaded');
+} else {
+  app.get('/api/admin/ifood/jobs', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin iFood jobs handler not loaded' });
+  });
+}
+
+if (adminLogsHandler) {
+  app.get('/api/admin/logs', adaptVercelHandler(adminLogsHandler));
+  console.log('✅ Admin logs handler loaded');
+} else {
+  app.get('/api/admin/logs', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin logs handler not loaded' });
+  });
+}
+
+if (adminIfoodJobsRetryHandler) {
+  app.post('/api/admin/ifood/jobs/:jobId/retry', adaptVercelHandler(adminIfoodJobsRetryHandler));
+  console.log('✅ Admin iFood jobs retry handler loaded');
+} else {
+  app.post('/api/admin/ifood/jobs/:jobId/retry', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin iFood jobs retry handler not loaded' });
+  });
+}
+
+if (adminIfoodJobsRunNowHandler) {
+  app.post('/api/admin/ifood/jobs/:jobId/run-now', adaptVercelHandler(adminIfoodJobsRunNowHandler));
+  console.log('✅ Admin iFood jobs run-now handler loaded');
+} else {
+  app.post('/api/admin/ifood/jobs/:jobId/run-now', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin iFood jobs run-now handler not loaded' });
+  });
+}
 
 // ============================================
 // ROTAS DE API DO IFOOD (Dados e Financeiro)
