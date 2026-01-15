@@ -143,6 +143,7 @@ const reviewsListHandler = loadHandler('./ifood/reviews/index');
 const reviewsSummaryHandler = loadHandler('./ifood/reviews/summary');
 const reviewsSettingsHandler = loadHandler('./ifood/reviews/settings');
 const reviewsDetailHandler = loadHandler('./ifood/reviews/[reviewId]');
+const reviewsAnswersHandler = loadHandler('./ifood/reviews/[reviewId]/answers');
 
 // Admin
 const adminIfoodJobsHandler = loadHandler('./admin/ifood/jobs');
@@ -420,6 +421,15 @@ if (reviewsDetailHandler) {
 } else {
   app.get('/api/ifood/reviews/:reviewId', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Reviews detail handler not loaded' });
+  });
+}
+
+if (reviewsAnswersHandler) {
+  app.post('/api/ifood/reviews/:reviewId/answers', adaptVercelHandler(reviewsAnswersHandler));
+  console.log('✅ Reviews answers handler loaded');
+} else {
+  app.post('/api/ifood/reviews/:reviewId/answers', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Reviews answers handler not loaded' });
   });
 }
 

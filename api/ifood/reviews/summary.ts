@@ -22,7 +22,8 @@ const cors = {
   'Access-Control-Allow-Headers': 'authorization, x-ifood-token, x-client-info, apikey, content-type'
 } as const;
 
-const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
+const IFOOD_PROXY_BASE = (process.env.IFOOD_PROXY_BASE || '').trim();
+const IFOOD_PROXY_KEY = (process.env.IFOOD_PROXY_KEY || '').trim();
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS headers
@@ -36,6 +37,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('X-Trace-Id', traceId);
 
   try {
+    if (!IFOOD_PROXY_BASE || !IFOOD_PROXY_KEY) {
+      return res.status(500).json({
+        error: 'ifood_proxy_not_configured',
+        details: 'Defina IFOOD_PROXY_BASE e IFOOD_PROXY_KEY no .env do Contabo.',
+        traceId,
+      });
+    }
+
     // Auth header: aceita x-ifood-token ou Authorization: Bearer
     const tokenHeader = (req.headers['x-ifood-token'] || req.headers['authorization'] || '') as string;
     const token = tokenHeader?.toLowerCase().startsWith('bearer ')
@@ -53,10 +62,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Candidatos para summary
     const candidates = [
-      `${IFOOD_BASE_URL}/v2/merchants/${merchantId}/reviews/summary${remainingQuery}`,
-      `${IFOOD_BASE_URL}/v2/merchants/${merchantId}/summary${remainingQuery}`,
-      `${IFOOD_BASE_URL}/review/v2.0/merchants/${merchantId}/reviews/summary${remainingQuery}`,
-      `${IFOOD_BASE_URL}/review/v2.0/merchants/${merchantId}/summary${remainingQuery}`,
+      `/v2/merchants/${merchantId}/reviews/summary${remainingQuery}`,
+      `/v2/merchants/${merchantId}/summary${remainingQuery}`,
+      `/review/v2.0/merchants/${merchantId}/reviews/summary${remainingQuery}`,
+      `/review/v2.0/merchants/${merchantId}/summary${remainingQuery}`,
     ];
 
     console.log('[ifood-reviews-summary] trace', { traceId, first: candidates[0] });
@@ -78,7 +87,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body: method !== 'GET' && method !== 'HEAD' ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {})) : undefined,
     };
 
-    let apiResponse = await fetch(candidates[0], options as any);
+    const proxyUrl = new URL(IFOOD_PROXY_BASE);
+    proxyUrl.searchParams.set('path', candidates[0]);
+    let apiResponse = await fetch(proxyUrl.toString(), {
+      ...options,
+      headers: {
+        ...headers,
+        'x-shared-key': IFOOD_PROXY_KEY,
+      },
+    } as any);
     let responseText = await apiResponse.text();
 
     // Tenta alternativas para 400/404/405
@@ -86,7 +103,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (let i = 1; i < candidates.length; i++) {
         const alt = candidates[i];
         console.warn('[ifood-reviews-summary] fallback', { traceId, from: candidates[0], status: apiResponse.status, altIndex: i, alt });
-        const retry = await fetch(alt, options as any);
+        const retryUrl = new URL(IFOOD_PROXY_BASE);
+        retryUrl.searchParams.set('path', alt);
+        const retry = await fetch(retryUrl.toString(), {
+          ...options,
+          headers: {
+            ...headers,
+            'x-shared-key': IFOOD_PROXY_KEY,
+          },
+        } as any);
         const retryText = await retry.text();
         console.log('[ifood-reviews-summary] attempt', { traceId, altIndex: i, status: retry.status });
         if (retry.ok || (retry.status !== 404 && retry.status !== 400)) {
