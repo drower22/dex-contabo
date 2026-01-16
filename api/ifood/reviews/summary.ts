@@ -99,7 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let responseText = await apiResponse.text();
 
     // Tenta alternativas para 400/404/405
-    if ((apiResponse.status === 404 || apiResponse.status === 400 || apiResponse.status === 405) && candidates.length > 1) {
+    if ((apiResponse.status === 404 || apiResponse.status === 400 || apiResponse.status === 405 || apiResponse.status === 401 || apiResponse.status === 403) && candidates.length > 1) {
       for (let i = 1; i < candidates.length; i++) {
         const alt = candidates[i];
         console.warn('[ifood-reviews-summary] fallback', { traceId, from: candidates[0], status: apiResponse.status, altIndex: i, alt });
@@ -114,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } as any);
         const retryText = await retry.text();
         console.log('[ifood-reviews-summary] attempt', { traceId, altIndex: i, status: retry.status });
-        if (retry.ok || (retry.status !== 404 && retry.status !== 400)) {
+        if (retry.ok) {
           apiResponse = retry;
           responseText = retryText;
           console.log('[ifood-reviews-summary] success', { traceId, altIndex: i, url: alt });
