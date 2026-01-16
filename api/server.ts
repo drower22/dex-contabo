@@ -145,6 +145,11 @@ const reviewsSettingsHandler = loadHandler('./ifood/reviews/settings');
 const reviewsDetailHandler = loadHandler('./ifood/reviews/[reviewId]');
 const reviewsAnswersHandler = loadHandler('./ifood/reviews/[reviewId]/answers');
 const reviewsSyncHandler = loadHandler('./ifood/reviews/sync');
+console.log('🔍 DEBUG: reviewsSyncHandler exists?', !!reviewsSyncHandler);
+if (reviewsSyncHandler) {
+  console.log('🔍 DEBUG: reviewsSyncHandler type:', typeof reviewsSyncHandler);
+  console.log('🔍 DEBUG: reviewsSyncHandler keys:', Object.keys(reviewsSyncHandler));
+}
 
 // Admin
 const adminIfoodJobsHandler = loadHandler('./admin/ifood/jobs');
@@ -435,10 +440,12 @@ if (reviewsAnswersHandler) {
 }
 
 // Sync de Reviews
+console.log('🔍 DEBUG: About to register reviews sync route...');
 if (reviewsSyncHandler) {
   app.post('/api/ifood/reviews/sync', reviewsSyncHandler);
   console.log('✅ Reviews sync handler loaded');
 } else {
+  console.log('❌ reviewsSyncHandler is null/undefined');
   app.post('/api/ifood/reviews/sync', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Reviews sync handler not loaded' });
   });
