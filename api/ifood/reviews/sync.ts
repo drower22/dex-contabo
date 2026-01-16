@@ -119,7 +119,7 @@ async function upsertReviews(records: any[], traceId: string): Promise<number> {
     const { error, count } = await supabase
       .from('ifood_reviews')
       .upsert(batch, {
-        onConflict: 'account_id,merchant_id,review_id',
+        onConflict: 'review_id',
         ignoreDuplicates: false,
         count: 'exact',
       });
@@ -228,14 +228,23 @@ export default async function handler(req: Request, res: Response) {
     }
 
     const records = rawReviews.map((r: any) => ({
+      review_id: String(r.id),
       account_id: String(accountId),
       merchant_id: String(merchantId),
-      review_id: String(r.id),
-      created_at: r.createdAt ?? null,
-      score: typeof r.score === 'number' ? r.score : r.score ?? null,
-      status: r.status ?? null,
-      visibility: r.visibility ?? null,
-      comment: r.comment ?? null,
+      merchant_name: r?.merchant?.name ?? null,
+      order_id: r?.order?.id ?? null,
+      order_short_id: r?.order?.shortId ?? null,
+      order_created_at: r?.order?.createdAt ?? null,
+      created_at: r?.createdAt ?? new Date().toISOString(),
+      score: typeof r?.score === 'number' ? Math.round(r.score) : r?.score ?? null,
+      has_score_changed: typeof r?.hasScoreChanged === 'boolean' ? r.hasScoreChanged : null,
+      status: r?.status ?? null,
+      visibility: r?.visibility ?? null,
+      survey_id: r?.surveyId ?? null,
+      version: r?.version ?? null,
+      comment: r?.comment ?? null,
+      customer_name: r?.customer?.name ?? null,
+      raw: r,
     }));
 
     const saved = await upsertReviews(records, traceId);
