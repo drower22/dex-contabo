@@ -227,8 +227,6 @@ export default async function handler(req: Request, res: Response) {
       page += 1;
     }
 
-    const nowIso = new Date().toISOString();
-
     const records = rawReviews.map((r: any) => ({
       account_id: String(accountId),
       merchant_id: String(merchantId),
@@ -238,7 +236,6 @@ export default async function handler(req: Request, res: Response) {
       status: r.status ?? null,
       visibility: r.visibility ?? null,
       comment: r.comment ?? null,
-      synced_at: nowIso,
     }));
 
     const saved = await upsertReviews(records, traceId);
