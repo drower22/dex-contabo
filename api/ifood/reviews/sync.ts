@@ -238,7 +238,6 @@ export default async function handler(req: Request, res: Response) {
       status: r.status ?? null,
       visibility: r.visibility ?? null,
       comment: r.comment ?? null,
-      replies_count: Array.isArray(r.replies) ? r.replies.length : null,
       synced_at: nowIso,
     }));
 
