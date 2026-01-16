@@ -56,19 +56,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const merchantId = (url.searchParams.get('merchantId') || '').trim();
     if (!merchantId) return res.status(400).json({ error: 'O parâmetro merchantId é obrigatório.', traceId });
 
+    // Normalize query params for iFood Review API v2.0
+    // - UI sends: page, size, periodDays
+    // - iFood expects: page, pageSize, dateFrom, dateTo, sort, sortBy
+    const inboundQuery = Object.fromEntries(url.searchParams.entries());
+
+    // size -> pageSize
+    const size = url.searchParams.get('size');
+    const pageSize = url.searchParams.get('pageSize');
+    if (size && !pageSize) url.searchParams.set('pageSize', size);
+    if (size) url.searchParams.delete('size');
+
+    // periodDays -> dateFrom/dateTo (UTC)
+    const periodDaysRaw = url.searchParams.get('periodDays');
+    if (periodDaysRaw) {
+      const days = Number(periodDaysRaw);
+      if (!Number.isNaN(days) && days > 0) {
+        const dateTo = new Date();
+        const dateFrom = new Date(dateTo.getTime() - days * 24 * 60 * 60 * 1000);
+        url.searchParams.set('dateFrom', dateFrom.toISOString());
+        url.searchParams.set('dateTo', dateTo.toISOString());
+      }
+      url.searchParams.delete('periodDays');
+    }
+
+    // Defaults for deterministic ordering
+    if (!url.searchParams.get('sort')) url.searchParams.set('sort', 'DESC');
+    if (!url.searchParams.get('sortBy')) url.searchParams.set('sortBy', 'CREATED_AT');
+
     // Remove merchantId da query, fará parte do path
     url.searchParams.delete('merchantId');
     const remainingQuery = url.search;
+    console.log('[ifood-reviews] inbound', { traceId, inboundQuery });
+    console.log('[ifood-reviews] normalized', { traceId, remainingQuery });
 
-    // Lista de reviews - candidatos V2 (com e sem /filtered)
+    // Prefer iFood Review API reference path first
     const candidates = [
+      `/review/v2.0/merchants/${merchantId}/reviews${remainingQuery}`,
       `/v2/merchants/${merchantId}/reviews${remainingQuery}`,
       `/v2/merchants/${merchantId}/reviews/filtered${remainingQuery}`,
     ];
-
-    // Fallback para rotas legadas
-    const legacy = candidates.map(c => c.replace('/v2/', '/review/v2.0/'));
-    const allCandidates = [...candidates, ...legacy];
+    // Backward/alternative shapes
+    const legacy = candidates
+      .filter((c) => c.startsWith('/v2/'))
+      .map((c) => c.replace('/v2/', '/review/v2.0/'));
+    const allCandidates = Array.from(new Set([...candidates, ...legacy]));
 
     console.log('[ifood-reviews] trace', { traceId, first: allCandidates[0] });
     console.log('[ifood-reviews] candidates', { traceId, count: allCandidates.length });
