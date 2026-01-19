@@ -108,6 +108,107 @@ async function fetchReviewsPage(args: {
   }
 }
 
+async function fetchReviewDetail(args: {
+  token: string;
+  merchantId: string;
+  reviewId: string;
+  traceId: string;
+}): Promise<any> {
+  const ifoodPath = `/review/v2.0/merchants/${args.merchantId}/reviews/${args.reviewId}`;
+
+  if (IFOOD_PROXY_BASE && IFOOD_PROXY_KEY) {
+    const proxyUrl = new URL(IFOOD_PROXY_BASE);
+    proxyUrl.searchParams.set('path', ifoodPath);
+
+    const resp = await fetch(proxyUrl.toString(), {
+      method: 'GET',
+      headers: {
+        'x-shared-key': IFOOD_PROXY_KEY,
+        Authorization: `Bearer ${args.token}`,
+        Accept: 'application/json',
+      },
+    });
+
+    const text = await resp.text();
+    if (!resp.ok) {
+      throw new Error(`Erro ao buscar review detail: ${resp.status} ${text?.slice(0, 300)}`);
+    }
+
+    try {
+      return text ? JSON.parse(text) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  const url = `${IFOOD_BASE_URL}${ifoodPath}`;
+  const resp = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${args.token}`,
+      Accept: 'application/json',
+    },
+  });
+
+  const text = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`Erro ao buscar review detail: ${resp.status} ${text?.slice(0, 300)}`);
+  }
+
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function enrichReviewsWithDetail(args: {
+  token: string;
+  merchantId: string;
+  reviews: any[];
+  traceId: string;
+}): Promise<{ enriched: any[]; detailFetched: number; detailErrors: number }> {
+  const hasCustomerName = (r: any) => typeof r?.customerName === 'string' && r.customerName.trim().length > 0;
+  const hasQuestions = (r: any) => Array.isArray(r?.questions) && r.questions.length > 0;
+  const needsDetail = (r: any) => !(hasCustomerName(r) && hasQuestions(r));
+
+  const toEnrich = args.reviews.filter((r) => r?.id && needsDetail(r));
+  if (!toEnrich.length) return { enriched: args.reviews, detailFetched: 0, detailErrors: 0 };
+
+  const concurrency = 6;
+  let detailFetched = 0;
+  let detailErrors = 0;
+
+  const byId = new Map<string, any>(args.reviews.map((r) => [String(r.id), r]));
+
+  for (let i = 0; i < toEnrich.length; i += concurrency) {
+    const chunk = toEnrich.slice(i, i + concurrency);
+    await Promise.all(
+      chunk.map(async (r) => {
+        const reviewId = String(r.id);
+        try {
+          const detail = await fetchReviewDetail({
+            token: args.token,
+            merchantId: args.merchantId,
+            reviewId,
+            traceId: args.traceId,
+          });
+          if (detail && typeof detail === 'object') {
+            detailFetched += 1;
+            const prev = byId.get(reviewId) || {};
+            byId.set(reviewId, { ...prev, ...detail });
+          }
+        } catch {
+          detailErrors += 1;
+        }
+      })
+    );
+  }
+
+  const enriched = args.reviews.map((r) => byId.get(String(r.id)) ?? r);
+  return { enriched, detailFetched, detailErrors };
+}
+
 async function upsertReviews(records: any[], traceId: string): Promise<number> {
   if (!records.length) return 0;
 
@@ -345,7 +446,14 @@ export default async function handler(req: Request, res: Response) {
       page += 1;
     }
 
-    const records = rawReviews.map((r: any) => ({
+    const { enriched: enrichedReviews, detailFetched, detailErrors } = await enrichReviewsWithDetail({
+      token,
+      merchantId: String(merchantId),
+      reviews: rawReviews,
+      traceId,
+    });
+
+    const records = enrichedReviews.map((r: any) => ({
       review_id: String(r.id),
       account_id: String(accountId),
       merchant_id: String(merchantId),
@@ -361,11 +469,11 @@ export default async function handler(req: Request, res: Response) {
       survey_id: r?.surveyId ?? null,
       version: r?.version ?? null,
       comment: r?.comment ?? null,
-      customer_name: r?.customerName ?? null,
+      customer_name: r?.customerName ?? r?.customer?.name ?? null,
       raw: r,
     }));
 
-    const replyRows = rawReviews.flatMap((r: any) => {
+    const replyRows = enrichedReviews.flatMap((r: any) => {
       const reviewId = String(r.id);
       const replies = Array.isArray(r?.replies) ? r.replies : [];
       return replies
@@ -381,7 +489,7 @@ export default async function handler(req: Request, res: Response) {
         }));
     });
 
-    const questionRows = rawReviews.flatMap((r: any) => {
+    const questionRows = enrichedReviews.flatMap((r: any) => {
       const reviewId = String(r.id);
       const questions = Array.isArray(r?.questions) ? r.questions : [];
       return questions
@@ -397,7 +505,7 @@ export default async function handler(req: Request, res: Response) {
         }));
     });
 
-    const questionAnswerRows = rawReviews.flatMap((r: any) => {
+    const questionAnswerRows = enrichedReviews.flatMap((r: any) => {
       const reviewId = String(r.id);
       const questions = Array.isArray(r?.questions) ? r.questions : [];
       return questions.flatMap((q: any) => {
@@ -433,6 +541,8 @@ export default async function handler(req: Request, res: Response) {
       replies_saved: repliesSaved,
       questions_saved: questionsSaved,
       question_answers_saved: answersSaved,
+      detail_fetched: detailFetched,
+      detail_errors: detailErrors,
       pages: page - 1,
     });
   } catch (e: any) {
