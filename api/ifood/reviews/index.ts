@@ -80,6 +80,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       url.searchParams.delete('periodDays');
     }
 
+    const dateFromRaw = url.searchParams.get('dateFrom');
+    const dateToRaw = url.searchParams.get('dateTo');
+    if (!dateFromRaw && !dateToRaw) {
+      const dateTo = new Date();
+      const dateFrom = new Date(dateTo.getTime() - 30 * 24 * 60 * 60 * 1000);
+      url.searchParams.set('dateFrom', dateFrom.toISOString());
+      url.searchParams.set('dateTo', dateTo.toISOString());
+    } else if (dateFromRaw && !dateToRaw) {
+      url.searchParams.set('dateTo', new Date().toISOString());
+    } else if (!dateFromRaw && dateToRaw) {
+      const dateTo = new Date(dateToRaw);
+      if (!Number.isNaN(dateTo.getTime())) {
+        const dateFrom = new Date(dateTo.getTime() - 30 * 24 * 60 * 60 * 1000);
+        url.searchParams.set('dateFrom', dateFrom.toISOString());
+      }
+    }
+
     // Defaults for deterministic ordering
     if (!url.searchParams.get('sort')) url.searchParams.set('sort', 'DESC');
     if (!url.searchParams.get('sortBy')) url.searchParams.set('sortBy', 'CREATED_AT');
