@@ -7,6 +7,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || 'https://merchant-api.ifood.com.br').trim();
 const IFOOD_PROXY_BASE = process.env.IFOOD_PROXY_BASE?.trim();
 const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY?.trim();
+const REVIEWS_DETAIL_RATE_LIMIT_MS = Number(process.env.REVIEWS_DETAIL_RATE_LIMIT_MS || 250);
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
@@ -106,6 +107,49 @@ async function fetchReviewsPage(args: {
   } catch {
     return null;
   }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function upsertReviewDetails(args: {
+  rows: Array<{
+    review_id: string;
+    account_id: string;
+    merchant_id: string;
+    customer_name: string | null;
+    raw: any;
+    fetched_at: string;
+  }>;
+  traceId: string;
+}): Promise<number> {
+  if (!args.rows.length) return 0;
+
+  const batchSize = 200;
+  let total = 0;
+  for (let i = 0; i < args.rows.length; i += batchSize) {
+    const batch = args.rows.slice(i, i + batchSize);
+    const { error, count } = await supabase
+      .from('ifood_review_details')
+      .upsert(batch, {
+        onConflict: 'review_id',
+        ignoreDuplicates: false,
+        count: 'exact',
+      });
+    if (error) {
+      console.error('[reviews-sync] details upsert error', {
+        trace_id: args.traceId,
+        message: (error as any).message,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        code: (error as any).code,
+      });
+      throw new Error('Erro ao salvar review details no banco');
+    }
+    total += count ?? batch.length;
+  }
+  return total;
 }
 
 async function fetchReviewDetail(args: {
@@ -370,6 +414,8 @@ export default async function handler(req: Request, res: Response) {
       days,
       from,
       to,
+      detailRateLimitMs,
+      detailMax,
     } = req.body || {};
 
     const accountId = rawAccountId || storeId;
@@ -446,14 +492,7 @@ export default async function handler(req: Request, res: Response) {
       page += 1;
     }
 
-    const { enriched: enrichedReviews, detailFetched, detailErrors } = await enrichReviewsWithDetail({
-      token,
-      merchantId: String(merchantId),
-      reviews: rawReviews,
-      traceId,
-    });
-
-    const records = enrichedReviews.map((r: any) => ({
+    const records = rawReviews.map((r: any) => ({
       review_id: String(r.id),
       account_id: String(accountId),
       merchant_id: String(merchantId),
@@ -473,7 +512,7 @@ export default async function handler(req: Request, res: Response) {
       raw: r,
     }));
 
-    const replyRows = enrichedReviews.flatMap((r: any) => {
+    const replyRows = rawReviews.flatMap((r: any) => {
       const reviewId = String(r.id);
       const replies = Array.isArray(r?.replies) ? r.replies : [];
       return replies
@@ -489,7 +528,7 @@ export default async function handler(req: Request, res: Response) {
         }));
     });
 
-    const questionRows = enrichedReviews.flatMap((r: any) => {
+    const questionRows = rawReviews.flatMap((r: any) => {
       const reviewId = String(r.id);
       const questions = Array.isArray(r?.questions) ? r.questions : [];
       return questions
@@ -505,7 +544,7 @@ export default async function handler(req: Request, res: Response) {
         }));
     });
 
-    const questionAnswerRows = enrichedReviews.flatMap((r: any) => {
+    const questionAnswerRows = rawReviews.flatMap((r: any) => {
       const reviewId = String(r.id);
       const questions = Array.isArray(r?.questions) ? r.questions : [];
       return questions.flatMap((q: any) => {
@@ -529,6 +568,53 @@ export default async function handler(req: Request, res: Response) {
     const questionsSaved = await upsertQuestions({ rows: questionRows, traceId });
     const answersSaved = await upsertQuestionAnswers({ rows: questionAnswerRows, traceId });
 
+    const effectiveRateLimitMs = Math.max(0, Number(detailRateLimitMs ?? REVIEWS_DETAIL_RATE_LIMIT_MS));
+    const maxDetail = Math.max(0, Number(detailMax ?? 0));
+
+    const detailRows: Array<{
+      review_id: string;
+      account_id: string;
+      merchant_id: string;
+      customer_name: string | null;
+      raw: any;
+      fetched_at: string;
+    }> = [];
+
+    let detailFetched = 0;
+    let detailErrors = 0;
+    const limit = maxDetail > 0 ? Math.min(rawReviews.length, maxDetail) : rawReviews.length;
+
+    for (let i = 0; i < limit; i += 1) {
+      const review = rawReviews[i];
+      const reviewId = String(review?.id || '').trim();
+      if (!reviewId) continue;
+      if (effectiveRateLimitMs > 0) await sleep(effectiveRateLimitMs);
+      try {
+        const detail = await fetchReviewDetail({
+          token,
+          merchantId: String(merchantId),
+          reviewId,
+          traceId,
+        });
+        if (detail && typeof detail === 'object') {
+          detailFetched += 1;
+          const customerName = detail?.customerName ?? detail?.customer?.name ?? null;
+          detailRows.push({
+            review_id: reviewId,
+            account_id: String(accountId),
+            merchant_id: String(merchantId),
+            customer_name: customerName,
+            raw: detail,
+            fetched_at: new Date().toISOString(),
+          });
+        }
+      } catch {
+        detailErrors += 1;
+      }
+    }
+
+    const detailsSaved = await upsertReviewDetails({ rows: detailRows, traceId });
+
     return res.status(200).json({
       success: true,
       trace_id: traceId,
@@ -541,6 +627,7 @@ export default async function handler(req: Request, res: Response) {
       replies_saved: repliesSaved,
       questions_saved: questionsSaved,
       question_answers_saved: answersSaved,
+      details_saved: detailsSaved,
       detail_fetched: detailFetched,
       detail_errors: detailErrors,
       pages: page - 1,

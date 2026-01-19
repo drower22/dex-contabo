@@ -147,6 +147,7 @@ const reviewsSummaryHandler = loadHandler('./ifood/reviews/summary');
 const reviewsSettingsHandler = loadHandler('./ifood/reviews/settings');
 const reviewsDetailHandler = loadHandler('./ifood/reviews/[reviewId]');
 const reviewsAnswersHandler = loadHandler('./ifood/reviews/[reviewId]/answers');
+const reviewsSyncDetailHandler = loadHandler('./ifood/reviews/[reviewId]/sync-detail');
 const reviewsSyncHandler = loadHandler('./ifood/reviews/sync');
 
 // AI
@@ -454,6 +455,15 @@ if (reviewsAnswersHandler) {
 } else {
   app.post('/api/ifood/reviews/:reviewId/answers', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Reviews answers handler not loaded' });
+  });
+}
+
+if (reviewsSyncDetailHandler) {
+  app.post('/api/ifood/reviews/:reviewId/sync-detail', adaptVercelHandler(reviewsSyncDetailHandler));
+  console.log('✅ Reviews sync-detail handler loaded');
+} else {
+  app.post('/api/ifood/reviews/:reviewId/sync-detail', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Reviews sync-detail handler not loaded' });
   });
 }
 
