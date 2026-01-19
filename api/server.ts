@@ -59,11 +59,14 @@ function adaptVercelHandler(handler: (req: any, res: any) => Promise<void>) {
       // Criar objetos compatíveis com Vercel
       const vercelReq: any = {
         ...req,
+        params: (req as any).params,
         query: req.query,
         body: req.body,
         headers: req.headers,
         method: req.method,
-        url: req.url,
+        // Preferir originalUrl para manter o path completo (inclui /api/... e query)
+        url: (req as any).originalUrl || req.url,
+        originalUrl: (req as any).originalUrl,
       };
       
       const vercelRes: any = {
