@@ -82,10 +82,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Candidatos para POST de resposta
     const candidates = [
-      `/v2/merchants/${merchantId}/reviews/${reviewId}/answers${remainingQuery}`,
-      `/v2/merchants/${merchantId}/reviews/${reviewId}/reply${remainingQuery}`,
+      `/merchants/${merchantId}/reviews/${reviewId}/answers${remainingQuery}`,
       `/review/v2.0/merchants/${merchantId}/reviews/${reviewId}/answers${remainingQuery}`,
+      `/v2/merchants/${merchantId}/reviews/${reviewId}/answers${remainingQuery}`,
+      `/merchants/${merchantId}/reviews/${reviewId}/reply${remainingQuery}`,
       `/review/v2.0/merchants/${merchantId}/reviews/${reviewId}/reply${remainingQuery}`,
+      `/v2/merchants/${merchantId}/reviews/${reviewId}/reply${remainingQuery}`,
     ];
 
     console.log('[ifood-reviews-answers] trace', { traceId, reviewId, first: candidates[0] });
@@ -118,6 +120,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } as any);
     let responseText = await apiResponse.text();
 
+    if (!apiResponse.ok) {
+      console.warn('[ifood-reviews-answers] first attempt non-ok', {
+        traceId,
+        status: apiResponse.status,
+        candidate: candidates[0],
+        responsePreview: responseText?.slice?.(0, 500),
+      });
+    }
+
     // Tenta alternativas para 400/404/405
     if ((apiResponse.status === 404 || apiResponse.status === 400 || apiResponse.status === 405 || apiResponse.status === 401 || apiResponse.status === 403) && candidates.length > 1) {
       for (let i = 1; i < candidates.length; i++) {
@@ -133,6 +144,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
         } as any);
         const retryText = await retry.text();
+        if (!retry.ok) {
+          console.warn('[ifood-reviews-answers] attempt non-ok', {
+            traceId,
+            altIndex: i,
+            status: retry.status,
+            candidate: alt,
+            responsePreview: retryText?.slice?.(0, 500),
+          });
+        }
         console.log('[ifood-reviews-answers] attempt', { traceId, altIndex: i, status: retry.status });
         if (retry.ok) {
           apiResponse = retry;
