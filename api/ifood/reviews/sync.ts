@@ -135,6 +135,124 @@ async function upsertReviews(records: any[], traceId: string): Promise<number> {
   return total;
 }
 
+async function upsertReplies(args: {
+  rows: Array<{
+    review_id: string;
+    account_id: string;
+    merchant_id: string;
+    text: string;
+    from: string | null;
+    created_at: string;
+    raw: any;
+  }>;
+  traceId: string;
+}): Promise<number> {
+  if (!args.rows.length) return 0;
+
+  const batchSize = 200;
+  let total = 0;
+
+  for (let i = 0; i < args.rows.length; i += batchSize) {
+    const batch = args.rows.slice(i, i + batchSize);
+    const { error, count } = await supabase
+      .from('ifood_review_replies')
+      .upsert(batch, {
+        onConflict: 'review_id,created_at,from,text',
+        ignoreDuplicates: false,
+        count: 'exact',
+      });
+
+    if (error) {
+      console.error('[reviews-sync] replies upsert error', {
+        trace_id: args.traceId,
+        message: (error as any).message,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        code: (error as any).code,
+      });
+      throw new Error('Erro ao salvar replies no banco');
+    }
+    total += count ?? batch.length;
+  }
+  return total;
+}
+
+async function upsertQuestions(args: {
+  rows: Array<{
+    review_id: string;
+    account_id: string;
+    merchant_id: string;
+    question_id: string;
+    type: string | null;
+    title: string | null;
+    raw: any;
+  }>;
+  traceId: string;
+}): Promise<number> {
+  if (!args.rows.length) return 0;
+  const batchSize = 200;
+  let total = 0;
+  for (let i = 0; i < args.rows.length; i += batchSize) {
+    const batch = args.rows.slice(i, i + batchSize);
+    const { error, count } = await supabase
+      .from('ifood_review_questions')
+      .upsert(batch, {
+        onConflict: 'review_id,question_id',
+        ignoreDuplicates: false,
+        count: 'exact',
+      });
+    if (error) {
+      console.error('[reviews-sync] questions upsert error', {
+        trace_id: args.traceId,
+        message: (error as any).message,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        code: (error as any).code,
+      });
+      throw new Error('Erro ao salvar questions no banco');
+    }
+    total += count ?? batch.length;
+  }
+  return total;
+}
+
+async function upsertQuestionAnswers(args: {
+  rows: Array<{
+    review_id: string;
+    question_id: string;
+    answer_id: string;
+    title: string | null;
+    raw: any;
+  }>;
+  traceId: string;
+}): Promise<number> {
+  if (!args.rows.length) return 0;
+  const batchSize = 500;
+  let total = 0;
+  for (let i = 0; i < args.rows.length; i += batchSize) {
+    const batch = args.rows.slice(i, i + batchSize);
+    const { error, count } = await supabase
+      .from('ifood_review_question_answers')
+      .upsert(batch, {
+        onConflict: 'review_id,question_id,answer_id',
+        ignoreDuplicates: false,
+        count: 'exact',
+      });
+    if (error) {
+      console.error('[reviews-sync] question answers upsert error', {
+        trace_id: args.traceId,
+        message: (error as any).message,
+        details: (error as any).details,
+        hint: (error as any).hint,
+        code: (error as any).code,
+      });
+      throw new Error('Erro ao salvar question answers no banco');
+    }
+    total += count ?? batch.length;
+  }
+  return total;
+}
+
 export default async function handler(req: Request, res: Response) {
   const traceId = randomUUID();
 
@@ -243,11 +361,65 @@ export default async function handler(req: Request, res: Response) {
       survey_id: r?.surveyId ?? null,
       version: r?.version ?? null,
       comment: r?.comment ?? null,
-      customer_name: r?.customer?.name ?? null,
+      customer_name: r?.customerName ?? null,
       raw: r,
     }));
 
+    const replyRows = rawReviews.flatMap((r: any) => {
+      const reviewId = String(r.id);
+      const replies = Array.isArray(r?.replies) ? r.replies : [];
+      return replies
+        .filter((x: any) => x && typeof x?.text === 'string')
+        .map((x: any) => ({
+          review_id: reviewId,
+          account_id: String(accountId),
+          merchant_id: String(merchantId),
+          text: String(x.text),
+          from: x?.from ? String(x.from) : null,
+          created_at: x?.createdAt ? String(x.createdAt) : (r?.createdAt ? String(r.createdAt) : new Date().toISOString()),
+          raw: x,
+        }));
+    });
+
+    const questionRows = rawReviews.flatMap((r: any) => {
+      const reviewId = String(r.id);
+      const questions = Array.isArray(r?.questions) ? r.questions : [];
+      return questions
+        .filter((q: any) => q && q.id)
+        .map((q: any) => ({
+          review_id: reviewId,
+          account_id: String(accountId),
+          merchant_id: String(merchantId),
+          question_id: String(q.id),
+          type: q?.type ? String(q.type) : null,
+          title: q?.title ? String(q.title) : null,
+          raw: q,
+        }));
+    });
+
+    const questionAnswerRows = rawReviews.flatMap((r: any) => {
+      const reviewId = String(r.id);
+      const questions = Array.isArray(r?.questions) ? r.questions : [];
+      return questions.flatMap((q: any) => {
+        const qid = q?.id ? String(q.id) : null;
+        if (!qid) return [];
+        const answers = Array.isArray(q?.answers) ? q.answers : [];
+        return answers
+          .filter((a: any) => a && a.id)
+          .map((a: any) => ({
+            review_id: reviewId,
+            question_id: qid,
+            answer_id: String(a.id),
+            title: a?.title ? String(a.title) : null,
+            raw: a,
+          }));
+      });
+    });
+
     const saved = await upsertReviews(records, traceId);
+    const repliesSaved = await upsertReplies({ rows: replyRows, traceId });
+    const questionsSaved = await upsertQuestions({ rows: questionRows, traceId });
+    const answersSaved = await upsertQuestionAnswers({ rows: questionAnswerRows, traceId });
 
     return res.status(200).json({
       success: true,
@@ -258,6 +430,9 @@ export default async function handler(req: Request, res: Response) {
       date_range: { dateFrom, dateTo },
       fetched: totalFetched,
       saved,
+      replies_saved: repliesSaved,
+      questions_saved: questionsSaved,
+      question_answers_saved: answersSaved,
       pages: page - 1,
     });
   } catch (e: any) {

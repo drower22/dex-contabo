@@ -19,7 +19,6 @@ function readJsonBody<T = any>(req: Connect.IncomingMessage): Promise<T> {
 function clampReply(text: string): string {
   const t = (text || '').trim();
   if (t.length < 10) return t.padEnd(10, '.');
-  if (t.length > 300) return t.slice(0, 300);
   return t;
 }
 
@@ -48,13 +47,18 @@ export const aiReviewsReplyHandler: Connect.NextHandleFunction = async (req, res
     const extra: string = settings?.extraInstructions || '';
 
     const system = [
-      'Você é um assistente que escreve respostas curtas, educadas e úteis a avaliações de clientes no iFood.',
+      'Você é um assistente que escreve respostas profissionais, claras e úteis a avaliações de clientes no iFood.',
       'Regras:',
-      '- O texto final deve ter entre 10 e 300 caracteres.',
+      '- O texto final deve ter pelo menos 10 caracteres (não há limite máximo rígido).',
       '- Evite dados sensíveis, gírias, linguagem ofensiva ou acusações.',
       '- Use um tom adequado ao preset informado.',
-      '- Se a avaliação for negativa, mostre empatia e ofereça ajuda.',
-      '- Se for positiva, agradeça de forma sincera.',
+      '- Sempre reforce que a situação será tratada e que estamos à disposição para dúvidas.',
+      '- Se a avaliação for negativa, peça desculpas e demonstre empatia.',
+      '- Se for positiva, agradeça de forma sincera e convide a retornar.',
+      'Padrões por tipo de reclamação (deduza pelo comentário):',
+      '- Qualidade do alimento/produto: NÃO cite o item específico; reforce cuidado e padrão de preparo, peça desculpas, diga que será revisado internamente.',
+      '- Atraso na entrega: peça desculpas; explique de forma geral (ex.: alta demanda/variáveis logísticas) sem justificar demais; reforce ações para reduzir atrasos.',
+      '- Falta de educação/atendimento: peça desculpas; diga que o atendimento será revisto e reforçado com a equipe.',
       extra ? `- Instruções adicionais: ${extra}` : '',
     ].filter(Boolean).join('\n');
 
@@ -80,7 +84,7 @@ export const aiReviewsReplyHandler: Connect.NextHandleFunction = async (req, res
           { role: 'user', content: user },
         ],
         temperature: 0.6,
-        max_tokens: 256,
+        max_tokens: 512,
       }),
     });
 

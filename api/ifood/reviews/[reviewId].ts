@@ -63,10 +63,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     url.searchParams.delete('merchantId');
     const remainingQuery = url.search;
 
-    // Candidatos para detalhe de review
+    // Review module is exposed under /review/v2.0 on merchant-api host.
+    // Keep /v2 as fallback.
     const candidates = [
-      `/v2/merchants/${merchantId}/reviews/${reviewId}${remainingQuery}`,
       `/review/v2.0/merchants/${merchantId}/reviews/${reviewId}${remainingQuery}`,
+      `/v2/merchants/${merchantId}/reviews/${reviewId}${remainingQuery}`,
     ];
 
     console.log('[ifood-reviews-detail] trace', { traceId, reviewId, first: candidates[0] });

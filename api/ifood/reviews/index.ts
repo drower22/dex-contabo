@@ -97,6 +97,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // Doc/homologação: addCount=true para receber total/pageCount
+    if (!url.searchParams.get('addCount')) url.searchParams.set('addCount', 'true');
+
     // Defaults for deterministic ordering
     if (!url.searchParams.get('sort')) url.searchParams.set('sort', 'DESC');
     if (!url.searchParams.get('sortBy')) url.searchParams.set('sortBy', 'CREATED_AT');
@@ -107,7 +110,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('[ifood-reviews] inbound', { traceId, inboundQuery });
     console.log('[ifood-reviews] normalized', { traceId, remainingQuery });
 
-    // Prefer iFood Review API reference path first
+    // Review module is exposed under /review/v2.0 on merchant-api host.
+    // Keep /v2 as fallback; avoid non-prefixed /merchants which yields 404 "no Route matched".
     const candidates = [
       `/review/v2.0/merchants/${merchantId}/reviews${remainingQuery}`,
       `/v2/merchants/${merchantId}/reviews${remainingQuery}`,
