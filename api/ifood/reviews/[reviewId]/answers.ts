@@ -53,12 +53,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : tokenHeader;
     if (!token) return res.status(401).json({ error: 'Token de autenticação não fornecido.', traceId });
 
-    const url = new URL(req.url || '/', 'https://local');
+    const rawUrl = ((req as any)?.originalUrl || req.url || '/').toString();
+    const url = new URL(rawUrl, 'https://local');
     const merchantId = (url.searchParams.get('merchantId') || '').trim();
     if (!merchantId) return res.status(400).json({ error: 'O parâmetro merchantId é obrigatório.', traceId });
 
-    const reviewId = req.query.reviewId as string;
-    if (!reviewId) return res.status(400).json({ error: 'reviewId é obrigatório.', traceId });
+    const reviewId =
+      (req.query as any)?.reviewId ||
+      (req as any)?.params?.reviewId ||
+      url.pathname.match(/\/reviews\/([^/]+)\/answers/i)?.[1] ||
+      rawUrl.match(/\/reviews\/([^/?#]+)\/answers/i)?.[1];
+    if (!reviewId) {
+      console.warn('[ifood-reviews-answers] missing reviewId', {
+        traceId,
+        rawUrl,
+        reqUrl: (req as any)?.url,
+        originalUrl: (req as any)?.originalUrl,
+        pathname: url.pathname,
+        query: (req as any)?.query,
+        params: (req as any)?.params,
+      });
+      return res.status(400).json({ error: 'reviewId é obrigatório.', traceId });
+    }
 
     // Remove merchantId da query, fará parte do path
     url.searchParams.delete('merchantId');
