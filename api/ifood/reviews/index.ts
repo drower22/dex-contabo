@@ -94,13 +94,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const candidates = [
       `/review/v2.0/merchants/${merchantId}/reviews${remainingQuery}`,
       `/v2/merchants/${merchantId}/reviews${remainingQuery}`,
-      `/v2/merchants/${merchantId}/reviews/filtered${remainingQuery}`,
     ];
-    // Backward/alternative shapes
-    const legacy = candidates
-      .filter((c) => c.startsWith('/v2/'))
-      .map((c) => c.replace('/v2/', '/review/v2.0/'));
-    const allCandidates = Array.from(new Set([...candidates, ...legacy]));
+    const allCandidates = Array.from(new Set(candidates));
 
     console.log('[ifood-reviews] trace', { traceId, first: allCandidates[0] });
     console.log('[ifood-reviews] candidates', { traceId, count: allCandidates.length });

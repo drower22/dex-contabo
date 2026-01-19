@@ -145,6 +145,9 @@ const reviewsSettingsHandler = loadHandler('./ifood/reviews/settings');
 const reviewsDetailHandler = loadHandler('./ifood/reviews/[reviewId]');
 const reviewsAnswersHandler = loadHandler('./ifood/reviews/[reviewId]/answers');
 const reviewsSyncHandler = loadHandler('./ifood/reviews/sync');
+
+// AI
+const aiReviewsReplyHandler = loadHandler('./ai/reviews-reply');
 console.log('🔍 DEBUG: reviewsSyncHandler exists?', !!reviewsSyncHandler);
 if (reviewsSyncHandler) {
   console.log('🔍 DEBUG: reviewsSyncHandler type:', typeof reviewsSyncHandler);
@@ -400,6 +403,18 @@ if (reviewsListHandler) {
 } else {
   app.get('/api/ifood/reviews', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Reviews list handler not loaded' });
+  });
+}
+
+// ============================================
+// ROTAS DE IA
+// ============================================
+if (aiReviewsReplyHandler) {
+  app.post('/api/ai/reviews-reply', aiReviewsReplyHandler);
+  console.log('✅ AI reviews-reply handler loaded');
+} else {
+  app.post('/api/ai/reviews-reply', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'AI reviews-reply handler not loaded' });
   });
 }
 
