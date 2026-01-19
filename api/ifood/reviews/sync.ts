@@ -152,6 +152,39 @@ async function upsertReviewDetails(args: {
   return total;
 }
 
+async function selectReviewIdsForDetails(args: {
+  accountId: string;
+  merchantId: string;
+  dateFrom: string;
+  dateTo: string;
+  limit: number;
+  traceId: string;
+}): Promise<string[]> {
+  const safeLimit = Math.max(1, Math.min(Number(args.limit || 200), 2000));
+  const { data, error } = await supabase
+    .from('ifood_reviews')
+    .select('review_id, created_at')
+    .eq('account_id', args.accountId)
+    .eq('merchant_id', args.merchantId)
+    .gte('created_at', args.dateFrom)
+    .lte('created_at', args.dateTo)
+    .order('created_at', { ascending: false })
+    .limit(safeLimit);
+
+  if (error) {
+    console.error('[reviews-sync] selectReviewIdsForDetails error', {
+      trace_id: args.traceId,
+      message: (error as any).message,
+      details: (error as any).details,
+      hint: (error as any).hint,
+      code: (error as any).code,
+    });
+    return [];
+  }
+
+  return (data ?? []).map((r: any) => String(r.review_id)).filter(Boolean);
+}
+
 async function fetchReviewDetail(args: {
   token: string;
   merchantId: string;
@@ -571,6 +604,8 @@ export default async function handler(req: Request, res: Response) {
     const effectiveRateLimitMs = Math.max(0, Number(detailRateLimitMs ?? REVIEWS_DETAIL_RATE_LIMIT_MS));
     const maxDetail = Math.max(0, Number(detailMax ?? 0));
 
+    const wantsDetails = effectiveRateLimitMs > 0 || maxDetail > 0;
+
     const detailRows: Array<{
       review_id: string;
       account_id: string;
@@ -582,12 +617,29 @@ export default async function handler(req: Request, res: Response) {
 
     let detailFetched = 0;
     let detailErrors = 0;
-    const limit = maxDetail > 0 ? Math.min(rawReviews.length, maxDetail) : rawReviews.length;
+    let reviewIdsForDetail: string[] = [];
+    if (rawReviews.length > 0) {
+      const limit = maxDetail > 0 ? Math.min(rawReviews.length, maxDetail) : rawReviews.length;
+      reviewIdsForDetail = rawReviews
+        .slice(0, limit)
+        .map((r: any) => String(r?.id || '').trim())
+        .filter(Boolean);
+    } else if (wantsDetails) {
+      // Fallback: lista iFood veio vazia, mas podemos buscar detalhes para reviews já salvos no Supabase
+      // (útil quando o objetivo é completar customerName/questions no raw_detail)
+      const fallbackLimit = maxDetail > 0 ? maxDetail : 200;
+      reviewIdsForDetail = await selectReviewIdsForDetails({
+        accountId: String(accountId),
+        merchantId: String(merchantId),
+        dateFrom,
+        dateTo,
+        limit: fallbackLimit,
+        traceId,
+      });
+    }
 
-    for (let i = 0; i < limit; i += 1) {
-      const review = rawReviews[i];
-      const reviewId = String(review?.id || '').trim();
-      if (!reviewId) continue;
+    for (let i = 0; i < reviewIdsForDetail.length; i += 1) {
+      const reviewId = reviewIdsForDetail[i];
       if (effectiveRateLimitMs > 0) await sleep(effectiveRateLimitMs);
       try {
         const detail = await fetchReviewDetail({
