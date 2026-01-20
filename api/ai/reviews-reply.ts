@@ -4,8 +4,10 @@ import { randomUUID } from 'crypto';
 
 function clampReply(text: string): string {
   const t = (text || '').trim();
-  if (t.length < 10) return t.padEnd(10, '.');
-  return t;
+  const maxLen = 300;
+  const cut = t.length > maxLen ? t.slice(0, maxLen).trimEnd() : t;
+  if (cut.length < 10) return cut.padEnd(10, '.');
+  return cut;
 }
 
 async function tryPersistSuggestion(args: {
@@ -144,7 +146,7 @@ export default async function handler(req: Request, res: Response) {
     const system = [
       'Você é um assistente que escreve respostas profissionais, claras e úteis a avaliações de clientes no iFood.',
       'Regras:',
-      '- O texto final deve ter pelo menos 10 caracteres (não há limite máximo rígido).',
+      '- O texto final deve ter pelo menos 10 caracteres e no máximo 300 caracteres.',
       '- Evite dados sensíveis, gírias, linguagem ofensiva ou acusações.',
       '- Não prometa reembolso/compensação ou ações fora da plataforma.',
       '- Use um tom adequado ao preset informado.',
@@ -197,7 +199,7 @@ export default async function handler(req: Request, res: Response) {
         top_p: 0.9,
         presence_penalty: 0.6,
         frequency_penalty: 0.4,
-        max_tokens: 512,
+        max_tokens: 220,
       }),
     });
 
