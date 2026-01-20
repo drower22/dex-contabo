@@ -86,7 +86,7 @@ export default async function handler(req: Request, res: Response) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey) as any;
 
-    const { accountId, merchantId, reviewId, settings } = req.body || {};
+    const { accountId, merchantId, reviewId, settings, variationSeed, variationStyle } = req.body || {};
 
     if (!accountId || !merchantId || !reviewId) {
       return res.status(400).json({
@@ -97,8 +97,8 @@ export default async function handler(req: Request, res: Response) {
     }
 
     const { data: row, error: readError } = await (supabase as any)
-      .from('ifood_reviews')
-      .select('review_id, account_id, merchant_id, created_at, score, comment, order_short_id, raw')
+      .from('ifood_reviews_view')
+      .select('review_id, account_id, merchant_id, created_at, score, comment, order_short_id, raw, customer_name, client_name')
       .eq('review_id', String(reviewId))
       .eq('account_id', String(accountId))
       .eq('merchant_id', String(merchantId))
@@ -121,6 +121,21 @@ export default async function handler(req: Request, res: Response) {
     const preset: string = settings?.preset || 'empathetic';
     const extra: string = settings?.extraInstructions || '';
 
+    const customerName = typeof (row as any).customer_name === 'string' ? (row as any).customer_name.trim() : '';
+    const clientName = typeof (row as any).client_name === 'string' ? (row as any).client_name.trim() : '';
+    const previousSuggestion = typeof raw?.ai_reply_suggestion?.text === 'string' ? raw.ai_reply_suggestion.text.trim() : '';
+
+    const seedStr = typeof variationSeed === 'string' || typeof variationSeed === 'number' ? String(variationSeed) : randomUUID();
+    const styleStr = typeof variationStyle === 'string' ? variationStyle : '';
+    const styleRulesByKey: Record<string, string> = {
+      concise: 'Formato: 2 frases curtas. Sem emojis. Feche com uma frase curta de disponibilidade.',
+      warm: 'Formato: 3-4 frases. Tom acolhedor e humano. Sem justificar demais.',
+      formal: 'Formato: 3-4 frases. Tom formal e objetivo. Sem exclamações.',
+      upbeat: 'Formato: 3-4 frases. Tom positivo. Use 1 exclamação no máximo.',
+      direct: 'Formato: 2-3 frases. Vá direto ao ponto. Sem floreios.',
+    };
+    const styleRule = styleRulesByKey[styleStr] || 'Formato: 3-4 frases. Linguagem natural. Sem repetir estruturas anteriores.';
+
     const score = typeof (row as any).score === 'number' ? (row as any).score : undefined;
     const comment = typeof (row as any).comment === 'string' ? (row as any).comment : '';
     const orderShortId = typeof (row as any).order_short_id === 'string' ? (row as any).order_short_id : undefined;
@@ -136,6 +151,9 @@ export default async function handler(req: Request, res: Response) {
       '- Sempre reforce que a situação será tratada e que estamos à disposição para dúvidas.',
       '- Se a avaliação for negativa, peça desculpas e demonstre empatia.',
       '- Se for positiva, agradeça de forma sincera e convide a retornar.',
+      clientName ? `- Mencione o nome do cliente (Dex) "${clientName}" na resposta de forma natural.` : '',
+      previousSuggestion ? '- Gere uma versão bem diferente da sugestão anterior: mude estrutura, abertura, conectivos e vocabulário. Não reutilize frases.' : '',
+      styleRule,
       'Padrões por tipo de reclamação (deduza pelo comentário):',
       '- Qualidade do alimento/produto: NÃO cite o item específico; reforce cuidado e padrão de preparo, peça desculpas, diga que será revisado internamente.',
       '- Atraso na entrega: peça desculpas; explique de forma geral (ex.: alta demanda/variáveis logísticas) sem justificar demais; reforce ações para reduzir atrasos.',
@@ -147,8 +165,13 @@ export default async function handler(req: Request, res: Response) {
 
     const user = [
       `Preset: ${preset}`,
+      `VariationSeed: ${seedStr}`,
+      styleStr ? `VariationStyle: ${styleStr}` : undefined,
       score !== undefined ? `Nota: ${score}` : undefined,
       comment ? `Comentário do cliente: "${comment}"` : 'Sem comentário do cliente.',
+      customerName ? `Nome do consumidor (iFood): ${customerName}` : undefined,
+      clientName ? `Nome do cliente (Dex): ${clientName}` : undefined,
+      previousSuggestion ? `Sugestão anterior (não repetir): """${previousSuggestion}"""` : undefined,
       orderShortId ? `Pedido: #${orderShortId}` : undefined,
       createdAt ? `Data: ${createdAt}` : undefined,
       'Escreva apenas a resposta final ao cliente (sem preâmbulo).',
@@ -170,7 +193,10 @@ export default async function handler(req: Request, res: Response) {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-        temperature: 0.6,
+        temperature: 0.95,
+        top_p: 0.9,
+        presence_penalty: 0.6,
+        frequency_penalty: 0.4,
         max_tokens: 512,
       }),
     });
