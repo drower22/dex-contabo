@@ -15,6 +15,8 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createClient } from '@supabase/supabase-js';
+import { resolveAccountId } from '../../../_shared/account-resolver';
 
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*';
 const cors = {
@@ -25,6 +27,124 @@ const cors = {
 
 const IFOOD_PROXY_BASE = (process.env.IFOOD_PROXY_BASE || '').trim();
 const IFOOD_PROXY_KEY = (process.env.IFOOD_PROXY_KEY || '').trim();
+
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+
+function getSupabaseServiceClient() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return null;
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+async function resolveAccountIdByMerchantId(merchantId: string): Promise<string | null> {
+  const m = (merchantId || '').trim();
+  if (!m) return null;
+
+  try {
+    const resolved = await resolveAccountId(m);
+    if (resolved?.id) return String(resolved.id);
+  } catch {
+    // ignore
+  }
+
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from('ifood_store_auth')
+    .select('account_id')
+    .eq('ifood_merchant_id', m)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return null;
+  const id = (data as any)?.account_id;
+  return typeof id === 'string' && id.trim() ? id.trim() : null;
+}
+
+async function persistReplyToSupabase(params: {
+  reviewId: string;
+  merchantId: string;
+  replyText: string;
+  traceId: string;
+}) {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) {
+    console.warn('[ifood-reviews-answers] supabase not configured for persistence', { traceId: params.traceId });
+    return;
+  }
+
+  const reviewId = params.reviewId;
+  const merchantId = params.merchantId;
+  const replyText = (params.replyText || '').trim();
+  if (!reviewId || !merchantId || !replyText) return;
+
+  const accountId = await resolveAccountIdByMerchantId(merchantId);
+  if (!accountId) {
+    console.warn('[ifood-reviews-answers] could not resolve account_id for merchantId', {
+      traceId: params.traceId,
+      merchantId,
+      reviewId,
+    });
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  const replyObj = { createdAt: nowIso, text: replyText, from: 'merchant' };
+
+  // 1) Normalizada
+  const { error: insertError } = await supabase
+    .from('ifood_review_replies')
+    .insert({
+      review_id: reviewId,
+      account_id: accountId,
+      merchant_id: merchantId,
+      text: replyText,
+      created_at: nowIso,
+    } as any);
+
+  if (insertError) {
+    console.warn('[ifood-reviews-answers] insert ifood_review_replies error', {
+      traceId: params.traceId,
+      reviewId,
+      accountId,
+      merchantId,
+      error: insertError,
+    });
+  }
+
+  // 2) Best-effort: refletir em ifood_reviews.raw.replies (para UI/view)
+  try {
+    const { data: current, error: readError } = await supabase
+      .from('ifood_reviews')
+      .select('raw')
+      .eq('review_id', reviewId)
+      .maybeSingle();
+
+    if (readError) {
+      console.warn('[ifood-reviews-answers] read ifood_reviews.raw error', { traceId: params.traceId, reviewId, error: readError });
+      return;
+    }
+
+    const raw = (current as any)?.raw ?? {};
+    const existing = Array.isArray((raw as any)?.replies) ? (raw as any).replies : [];
+    const nextRaw = { ...raw, replies: [replyObj, ...existing] };
+
+    const { error: updateError } = await supabase
+      .from('ifood_reviews')
+      .update({ raw: nextRaw })
+      .eq('review_id', reviewId);
+
+    if (updateError) {
+      console.warn('[ifood-reviews-answers] update ifood_reviews.raw error', { traceId: params.traceId, reviewId, error: updateError });
+    }
+  } catch (e: any) {
+    console.warn('[ifood-reviews-answers] persist raw exception', { traceId: params.traceId, reviewId, err: e?.message || String(e) });
+  }
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS headers
@@ -163,6 +283,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         apiResponse = retry;
         responseText = retryText;
+      }
+    }
+
+    if (apiResponse.ok && (req.method || '').toUpperCase() === 'POST') {
+      try {
+        const rawBody = (req as any)?.body;
+        const bodyObj = typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;
+        const replyText = String(bodyObj?.text ?? '').trim();
+        if (replyText) {
+          await persistReplyToSupabase({ reviewId: String(reviewId), merchantId, replyText, traceId });
+        }
+      } catch (e: any) {
+        console.warn('[ifood-reviews-answers] persist reply best-effort failed', { traceId, err: e?.message || String(e) });
       }
     }
 
