@@ -143,79 +143,61 @@ export default async function handler(req: Request, res: Response) {
       .maybeSingle();
     };
 
-    ({ data: row, error: readError } = await baseQuery(
-      'review_id, account_id, merchant_id, created_at, score, comment, order_short_id, raw, costumer_name, client_name'
-    ));
+    const buildSelect = (nameField: 'costumer_name' | 'customer_name', includeClientName: boolean) =>
+      [
+        'review_id',
+        'account_id',
+        'merchant_id',
+        'created_at',
+        'score',
+        'comment',
+        'order_short_id',
+        'raw',
+        nameField,
+        includeClientName ? 'client_name' : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
 
-    if (readError && typeof readError?.message === 'string') {
-      const msg = readError.message.toLowerCase();
-      const missingClientName = msg.includes('client_name') && msg.includes('does not exist');
-      const missingCostumerName = msg.includes('costumer_name') && msg.includes('does not exist');
-      const missingCustomerName = msg.includes('customer_name') && msg.includes('does not exist');
+    const isMissingColumnError = (err: any, col: string): boolean => {
+      const msg = typeof err?.message === 'string' ? err.message.toLowerCase() : '';
+      return msg.includes(col.toLowerCase()) && msg.includes('does not exist');
+    };
+
+    // Try combinations so we can work with older schemas.
+    const attempts: Array<{ nameField: 'costumer_name' | 'customer_name'; includeClientName: boolean }> = [
+      { nameField: 'costumer_name', includeClientName: true },
+      { nameField: 'costumer_name', includeClientName: false },
+      { nameField: 'customer_name', includeClientName: true },
+      { nameField: 'customer_name', includeClientName: false },
+    ];
+
+    for (const a of attempts) {
+      ({ data: row, error: readError } = await baseQuery(buildSelect(a.nameField, a.includeClientName)));
+      if (!readError) break;
+
+      const missingClientName = isMissingColumnError(readError, 'client_name');
+      const missingCostumerName = isMissingColumnError(readError, 'costumer_name');
+      const missingCustomerName = isMissingColumnError(readError, 'customer_name');
 
       console.warn('[ai/reviews-reply] db read error', {
         trace_id: traceId,
         message: readError.message,
+        attempt: a,
         missingClientName,
         missingCostumerName,
         missingCustomerName,
       });
 
-      if (missingClientName || missingCostumerName || missingCustomerName) {
-        const hasClientName = !missingClientName;
-        const nameField = missingCostumerName ? 'customer_name' : 'costumer_name';
-        console.log('[ai/reviews-reply] db fallback retry', {
-          trace_id: traceId,
-          nameField,
-          includeClientName: hasClientName,
-        });
-        const selectStr = [
-          'review_id',
-          'account_id',
-          'merchant_id',
-          'created_at',
-          'score',
-          'comment',
-          'order_short_id',
-          'raw',
-          nameField,
-          hasClientName ? 'client_name' : null,
-        ]
-          .filter(Boolean)
-          .join(', ');
-
-        ({ data: row, error: readError } = await baseQuery(selectStr));
-
-        // If we still failed due to the name field, try the other spelling as a last resort.
-        if (readError && typeof readError?.message === 'string') {
-          const msg2 = readError.message.toLowerCase();
-          const stillMissingCostumerName = msg2.includes('costumer_name') && msg2.includes('does not exist');
-          const stillMissingCustomerName = msg2.includes('customer_name') && msg2.includes('does not exist');
-          if (stillMissingCostumerName || stillMissingCustomerName) {
-            const fallbackNameField = stillMissingCostumerName ? 'customer_name' : 'costumer_name';
-            console.log('[ai/reviews-reply] db fallback retry (last resort)', {
-              trace_id: traceId,
-              fallbackNameField,
-              includeClientName: hasClientName,
-            });
-            const selectStr2 = [
-              'review_id',
-              'account_id',
-              'merchant_id',
-              'created_at',
-              'score',
-              'comment',
-              'order_short_id',
-              'raw',
-              fallbackNameField,
-              hasClientName ? 'client_name' : null,
-            ]
-              .filter(Boolean)
-              .join(', ');
-            ({ data: row, error: readError } = await baseQuery(selectStr2));
-          }
-        }
+      // Only keep iterating on missing-column errors. Otherwise, fail fast.
+      if (!(missingClientName || missingCostumerName || missingCustomerName)) {
+        break;
       }
+
+      console.log('[ai/reviews-reply] db fallback next attempt', {
+        trace_id: traceId,
+        next: true,
+      });
     }
 
     if (readError) {
