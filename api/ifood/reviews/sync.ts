@@ -371,7 +371,6 @@ async function upsertReplies(args: {
     account_id: string;
     merchant_id: string;
     text: string;
-    from: string | null;
     created_at: string;
     raw: any;
   }>;
@@ -387,7 +386,9 @@ async function upsertReplies(args: {
     const { error, count } = await supabase
       .from('ifood_review_replies')
       .upsert(batch, {
-        onConflict: 'review_id,created_at,from,text',
+        // Compat: em alguns projetos a coluna `from` não existe no schema.
+        // Mantemos um identificador natural simples para evitar duplicidade.
+        onConflict: 'review_id,created_at,text',
         ignoreDuplicates: false,
         count: 'exact',
       });
@@ -607,7 +608,6 @@ export default async function handler(req: Request, res: ExpressResponse) {
           account_id: String(accountId),
           merchant_id: String(merchantId),
           text: String(x.text),
-          from: x?.from ? String(x.from) : null,
           created_at: x?.createdAt ? String(x.createdAt) : (r?.createdAt ? String(r.createdAt) : new Date().toISOString()),
           raw: x,
         }));
