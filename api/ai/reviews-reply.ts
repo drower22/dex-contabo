@@ -125,13 +125,23 @@ export default async function handler(req: Request, res: Response) {
     let row: any = null;
     let readError: any = null;
 
-    const baseQuery = (selectStr: string) => (supabase as any)
+    console.log('[ai/reviews-reply] db read start', {
+      trace_id: traceId,
+      account_id: String(accountId),
+      merchant_id: String(merchantId),
+      review_id: String(reviewId),
+    });
+
+    const baseQuery = (selectStr: string) => {
+      console.log('[ai/reviews-reply] db select', { trace_id: traceId, select: selectStr });
+      return (supabase as any)
       .from('ifood_reviews_view')
       .select(selectStr)
       .eq('review_id', String(reviewId))
       .eq('account_id', String(accountId))
       .eq('merchant_id', String(merchantId))
       .maybeSingle();
+    };
 
     ({ data: row, error: readError } = await baseQuery(
       'review_id, account_id, merchant_id, created_at, score, comment, order_short_id, raw, costumer_name, client_name'
@@ -143,9 +153,22 @@ export default async function handler(req: Request, res: Response) {
       const missingCostumerName = msg.includes('costumer_name') && msg.includes('does not exist');
       const missingCustomerName = msg.includes('customer_name') && msg.includes('does not exist');
 
+      console.warn('[ai/reviews-reply] db read error', {
+        trace_id: traceId,
+        message: readError.message,
+        missingClientName,
+        missingCostumerName,
+        missingCustomerName,
+      });
+
       if (missingClientName || missingCostumerName || missingCustomerName) {
         const hasClientName = !missingClientName;
         const nameField = missingCostumerName ? 'customer_name' : 'costumer_name';
+        console.log('[ai/reviews-reply] db fallback retry', {
+          trace_id: traceId,
+          nameField,
+          includeClientName: hasClientName,
+        });
         const selectStr = [
           'review_id',
           'account_id',
@@ -170,6 +193,11 @@ export default async function handler(req: Request, res: Response) {
           const stillMissingCustomerName = msg2.includes('customer_name') && msg2.includes('does not exist');
           if (stillMissingCostumerName || stillMissingCustomerName) {
             const fallbackNameField = stillMissingCostumerName ? 'customer_name' : 'costumer_name';
+            console.log('[ai/reviews-reply] db fallback retry (last resort)', {
+              trace_id: traceId,
+              fallbackNameField,
+              includeClientName: hasClientName,
+            });
             const selectStr2 = [
               'review_id',
               'account_id',
