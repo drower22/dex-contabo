@@ -15,7 +15,8 @@ async function tryPersistSuggestion(args: {
   reviewId: string;
   suggestion: { text: string; model?: string; usage?: any; createdAt: string };
   traceId: string;
-}) {
+}): Promise<string | null> {
+  let suggestionId: string | null = null;
   try {
     const { data: current, error: readError } = await (args.supabase as any)
       .from('ifood_reviews')
@@ -49,21 +50,44 @@ async function tryPersistSuggestion(args: {
   }
 
   try {
-    const { error } = await (args.supabase as any).from('ifood_review_ai_suggestions').insert({
+    const { data, error } = await (args.supabase as any)
+      .from('ifood_review_ai_suggestions')
+      .insert({
       review_id: args.reviewId,
       suggested_text: args.suggestion.text,
       model: args.suggestion.model ?? null,
       usage: args.suggestion.usage ?? null,
       created_at: args.suggestion.createdAt,
       trace_id: args.traceId,
-    } as any);
+    } as any)
+      .select('id')
+      .maybeSingle();
 
     if (error) {
       console.warn('[ai/reviews-reply] insert ifood_review_ai_suggestions error', { trace_id: args.traceId, message: error.message });
+    } else {
+      const id = (data as any)?.id;
+      if (typeof id === 'string' && id.trim()) suggestionId = id.trim();
     }
   } catch (e: any) {
     console.warn('[ai/reviews-reply] insert suggestion exception', { trace_id: args.traceId, message: e?.message || String(e) });
   }
+
+  try {
+    await (args.supabase as any).from('ifood_reviews_events').insert({
+      event_type: 'ai_suggestion_generated',
+      review_id: args.reviewId,
+      trace_id: args.traceId,
+      metadata: {
+        suggestion_id: suggestionId,
+        model: args.suggestion.model ?? null,
+      },
+    } as any);
+  } catch {
+    // best-effort
+  }
+
+  return suggestionId;
 }
 
 export default async function handler(req: Request, res: Response) {
@@ -98,13 +122,73 @@ export default async function handler(req: Request, res: Response) {
       });
     }
 
-    const { data: row, error: readError } = await (supabase as any)
+    let row: any = null;
+    let readError: any = null;
+
+    const baseQuery = (selectStr: string) => (supabase as any)
       .from('ifood_reviews_view')
-      .select('review_id, account_id, merchant_id, created_at, score, comment, order_short_id, raw, customer_name, client_name')
+      .select(selectStr)
       .eq('review_id', String(reviewId))
       .eq('account_id', String(accountId))
       .eq('merchant_id', String(merchantId))
       .maybeSingle();
+
+    ({ data: row, error: readError } = await baseQuery(
+      'review_id, account_id, merchant_id, created_at, score, comment, order_short_id, raw, costumer_name, client_name'
+    ));
+
+    if (readError && typeof readError?.message === 'string') {
+      const msg = readError.message.toLowerCase();
+      const missingClientName = msg.includes('client_name') && msg.includes('does not exist');
+      const missingCostumerName = msg.includes('costumer_name') && msg.includes('does not exist');
+      const missingCustomerName = msg.includes('customer_name') && msg.includes('does not exist');
+
+      if (missingClientName || missingCostumerName || missingCustomerName) {
+        const hasClientName = !missingClientName;
+        const nameField = missingCostumerName ? 'customer_name' : 'costumer_name';
+        const selectStr = [
+          'review_id',
+          'account_id',
+          'merchant_id',
+          'created_at',
+          'score',
+          'comment',
+          'order_short_id',
+          'raw',
+          nameField,
+          hasClientName ? 'client_name' : null,
+        ]
+          .filter(Boolean)
+          .join(', ');
+
+        ({ data: row, error: readError } = await baseQuery(selectStr));
+
+        // If we still failed due to the name field, try the other spelling as a last resort.
+        if (readError && typeof readError?.message === 'string') {
+          const msg2 = readError.message.toLowerCase();
+          const stillMissingCostumerName = msg2.includes('costumer_name') && msg2.includes('does not exist');
+          const stillMissingCustomerName = msg2.includes('customer_name') && msg2.includes('does not exist');
+          if (stillMissingCostumerName || stillMissingCustomerName) {
+            const fallbackNameField = stillMissingCostumerName ? 'customer_name' : 'costumer_name';
+            const selectStr2 = [
+              'review_id',
+              'account_id',
+              'merchant_id',
+              'created_at',
+              'score',
+              'comment',
+              'order_short_id',
+              'raw',
+              fallbackNameField,
+              hasClientName ? 'client_name' : null,
+            ]
+              .filter(Boolean)
+              .join(', ');
+            ({ data: row, error: readError } = await baseQuery(selectStr2));
+          }
+        }
+      }
+    }
 
     if (readError) {
       return res.status(500).json({ error: 'db_read_failed', message: readError.message, trace_id: traceId });
@@ -123,7 +207,9 @@ export default async function handler(req: Request, res: Response) {
     const preset: string = settings?.preset || 'empathetic';
     const extra: string = settings?.extraInstructions || '';
 
-    const customerName = typeof (row as any).customer_name === 'string' ? (row as any).customer_name.trim() : '';
+    const customerName = typeof (row as any).costumer_name === 'string'
+      ? (row as any).costumer_name.trim()
+      : (typeof (row as any).customer_name === 'string' ? (row as any).customer_name.trim() : '');
     const clientName = typeof (row as any).client_name === 'string' ? (row as any).client_name.trim() : '';
     const previousSuggestion = typeof raw?.ai_reply_suggestion?.text === 'string' ? raw.ai_reply_suggestion.text.trim() : '';
 
@@ -219,9 +305,9 @@ export default async function handler(req: Request, res: Response) {
       createdAt: new Date().toISOString(),
     };
 
-    await tryPersistSuggestion({ supabase, reviewId: String(reviewId), suggestion, traceId });
+    const suggestionId = await tryPersistSuggestion({ supabase, reviewId: String(reviewId), suggestion, traceId });
 
-    return res.status(200).json({ ...suggestion, trace_id: traceId });
+    return res.status(200).json({ ...suggestion, suggestion_id: suggestionId, trace_id: traceId });
   } catch (e: any) {
     console.error('[ai/reviews-reply] error', { trace_id: traceId, message: e?.message || String(e) });
     return res.status(500).json({ error: 'ai_reviews_reply_failed', message: e?.message || String(e), trace_id: traceId });
