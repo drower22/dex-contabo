@@ -1,4 +1,4 @@
-import type { Request, Response } from 'express';
+import type { Request, Response as ExpressResponse } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 
@@ -67,13 +67,15 @@ async function fetchReviewsPage(args: {
     const proxyUrl = new URL(IFOOD_PROXY_BASE);
     proxyUrl.searchParams.set('path', ifoodPath);
 
-    const resp = await fetch(proxyUrl.toString(), {
+    const resp = await fetchWithRetry(proxyUrl.toString(), {
       method: 'GET',
       headers: {
         'x-shared-key': IFOOD_PROXY_KEY,
         Authorization: `Bearer ${args.token}`,
         Accept: 'application/json',
       },
+      traceId: args.traceId,
+      label: 'reviews_page_proxy',
     });
 
     const text = await resp.text();
@@ -89,12 +91,14 @@ async function fetchReviewsPage(args: {
   }
 
   const url = `${IFOOD_BASE_URL}${ifoodPath}`;
-  const resp = await fetch(url, {
+  const resp = await fetchWithRetry(url, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${args.token}`,
       Accept: 'application/json',
     },
+    traceId: args.traceId,
+    label: 'reviews_page_direct',
   });
 
   const text = await resp.text();
@@ -111,6 +115,50 @@ async function fetchReviewsPage(args: {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type FetchRetryInit = RequestInit & { traceId: string; label: string };
+
+async function fetchWithRetry(input: any, init: FetchRetryInit): Promise<any> {
+  const maxAttempts = Math.max(1, Math.min(Number(process.env.REVIEWS_FETCH_MAX_ATTEMPTS || 3), 6));
+  const baseDelayMs = Math.max(50, Math.min(Number(process.env.REVIEWS_FETCH_RETRY_BASE_DELAY_MS || 400), 5000));
+
+  let lastErr: any = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const resp = await fetch(input, init);
+      if (resp.ok) return resp;
+
+      // Retry apenas para erros transitórios
+      if ([408, 425, 429, 500, 502, 503, 504].includes(resp.status) && attempt < maxAttempts) {
+        const delay = baseDelayMs * Math.pow(2, attempt - 1);
+        console.warn('[reviews-sync] fetch retry (http)', {
+          trace_id: init.traceId,
+          label: init.label,
+          attempt,
+          status: resp.status,
+          delay,
+        });
+        await sleep(delay);
+        continue;
+      }
+      return resp;
+    } catch (e: any) {
+      lastErr = e;
+      if (attempt >= maxAttempts) break;
+      const delay = baseDelayMs * Math.pow(2, attempt - 1);
+      console.warn('[reviews-sync] fetch retry (exception)', {
+        trace_id: init.traceId,
+        label: init.label,
+        attempt,
+        delay,
+        message: e?.message || String(e),
+      });
+      await sleep(delay);
+    }
+  }
+
+  throw lastErr ?? new Error('fetch_failed');
 }
 
 async function upsertReviewDetails(args: {
@@ -197,13 +245,15 @@ async function fetchReviewDetail(args: {
     const proxyUrl = new URL(IFOOD_PROXY_BASE);
     proxyUrl.searchParams.set('path', ifoodPath);
 
-    const resp = await fetch(proxyUrl.toString(), {
+    const resp = await fetchWithRetry(proxyUrl.toString(), {
       method: 'GET',
       headers: {
         'x-shared-key': IFOOD_PROXY_KEY,
         Authorization: `Bearer ${args.token}`,
         Accept: 'application/json',
       },
+      traceId: args.traceId,
+      label: 'review_detail_proxy',
     });
 
     const text = await resp.text();
@@ -219,12 +269,14 @@ async function fetchReviewDetail(args: {
   }
 
   const url = `${IFOOD_BASE_URL}${ifoodPath}`;
-  const resp = await fetch(url, {
+  const resp = await fetchWithRetry(url, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${args.token}`,
       Accept: 'application/json',
     },
+    traceId: args.traceId,
+    label: 'review_detail_direct',
   });
 
   const text = await resp.text();
@@ -431,7 +483,7 @@ async function upsertQuestionAnswers(args: {
   return total;
 }
 
-export default async function handler(req: Request, res: Response) {
+export default async function handler(req: Request, res: ExpressResponse) {
   const traceId = randomUUID();
 
   try {
