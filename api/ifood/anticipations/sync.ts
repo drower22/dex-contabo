@@ -150,8 +150,8 @@ export default async function handler(req: Request, res: Response) {
       }
 
       const windowParams = {
-        beginAnticipatedPaymentDate: currentStart.toISOString().slice(0, 10),
-        endAnticipatedPaymentDate: windowEnd.toISOString().slice(0, 10),
+        beginCalculationDate: currentStart.toISOString().slice(0, 10),
+        endCalculationDate: windowEnd.toISOString().slice(0, 10),
       } as const;
 
       console.log('[anticipations-sync] Chamando API de anticipations (janela)', {
@@ -166,7 +166,7 @@ export default async function handler(req: Request, res: Response) {
         if (IFOOD_PROXY_BASE && IFOOD_PROXY_KEY) {
           // Usar proxydex em Vercel (padrão path + x-shared-key)
           // Aqui o proxy espera que TODO o path + query sejam enviados em "path".
-          // Ex: path=/financial/.../anticipations?beginAnticipatedPaymentDate=...&endAnticipatedPaymentDate=...
+          // Ex: path=/financial/.../anticipations?beginCalculationDate=...&endCalculationDate=...
           const proxyUrl = new URL(IFOOD_PROXY_BASE);
           const query = new URLSearchParams(windowParams as any).toString();
           const fullPath = query ? `${ifoodPath}?${query}` : ifoodPath;
@@ -217,8 +217,8 @@ export default async function handler(req: Request, res: Response) {
 
         console.log('[anticipations-sync] Janela processada com sucesso', {
           trace_id: traceId,
-          begin: windowParams.beginAnticipatedPaymentDate,
-          end: windowParams.endAnticipatedPaymentDate,
+          begin: windowParams.beginCalculationDate,
+          end: windowParams.endCalculationDate,
           count: Array.isArray(windowData) ? windowData.length : 0,
         });
 
