@@ -66,6 +66,13 @@ async function fetchSalesPage(
     // Alguns tenants retornam 400 quando a página solicitada excede pageCount.
     // Tratar como fim da paginação para não quebrar o sync.
     if (response.status === 400 && errorText.toLowerCase().includes('invalid page')) {
+      // Alguns tenants rejeitam page=0 (exigem > 0). Nesse caso, é erro de configuração,
+      // não "fim" de paginação.
+      if (page <= 1) {
+        console.error(`❌ [syncIfoodSales] Invalid page (cannot continue) page ${page}:`, errorText);
+        throw new Error(`Invalid page (${page}) returned by iFood API`);
+      }
+
       console.warn(`⚠️ [syncIfoodSales] Invalid page (treat as end) page ${page}:`, errorText);
       return { sales: [], hasMore: false };
     }
@@ -280,7 +287,8 @@ export async function syncIfoodSales(req: Request, res: Response) {
       for (const chunk of chunks) {
         console.log(`📦 [API] Processando chunk: ${chunk.start} a ${chunk.end}`);
         
-        let page = 0;
+        // Alguns tenants do iFood exigem page > 0.
+        let page = 1;
         let hasMore = true;
 
         while (hasMore) {
@@ -298,6 +306,31 @@ export async function syncIfoodSales(req: Request, res: Response) {
             break;
           }
         }
+      }
+
+      // Se não conseguimos buscar nada, não podemos apagar dados existentes.
+      // (Evita "zerar" vendas por erro de paginação/token/integração.)
+      if (allSales.length === 0) {
+        console.warn('⚠️ [syncIfoodSales] Nenhuma venda retornada pela API. Pulando limpeza e upsert para evitar apagar dados existentes.', {
+          accountId,
+          merchantId,
+          periodStart,
+          periodEnd,
+          totalChunks: chunks.length,
+          totalPages,
+        });
+
+        return res.status(200).json({
+          success: true,
+          message: 'Sincronização concluída (nenhuma venda retornada pela API)',
+          data: {
+            salesSynced: 0,
+            totalPages,
+            totalChunks: chunks.length,
+            periodStart,
+            periodEnd,
+          },
+        });
       }
 
       // 4. Limpar vendas existentes no período antes de salvar novas
