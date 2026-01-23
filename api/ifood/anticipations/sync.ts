@@ -144,7 +144,8 @@ export default async function handler(req: Request, res: Response) {
     let currentStart = new Date(start);
     while (currentStart <= end) {
       const windowEnd = new Date(currentStart);
-      windowEnd.setUTCDate(windowEnd.getUTCDate() + 30);
+      // Janela máxima de 30 dias (incluindo begin e end): begin + 29 dias
+      windowEnd.setUTCDate(windowEnd.getUTCDate() + 29);
       if (windowEnd > end) {
         windowEnd.setTime(end.getTime());
       }
@@ -208,18 +209,28 @@ export default async function handler(req: Request, res: Response) {
         // {
         //   beginDate, endDate, balance, merchantId, settlements: [...]
         // }
+        const responseData = apiResponse.data;
         const windowData: AnticipationItem[] =
-          apiResponse.data?.settlements ||
-          apiResponse.data?.data ||
-          apiResponse.data?.anticipations ||
-          apiResponse.data ||
+          responseData?.settlements ||
+          responseData?.data ||
+          responseData?.anticipations ||
+          responseData ||
           [];
+
+        const settlements = Array.isArray(responseData?.settlements) ? responseData.settlements : [];
+        const closingItemsCount = settlements.reduce((sum: number, s: any) => {
+          const items = Array.isArray(s?.closingItems) ? s.closingItems.length : 0;
+          return sum + items;
+        }, 0);
 
         console.log('[anticipations-sync] Janela processada com sucesso', {
           trace_id: traceId,
           begin: windowParams.beginCalculationDate,
           end: windowParams.endCalculationDate,
-          count: Array.isArray(windowData) ? windowData.length : 0,
+          settlementsCount: Array.isArray(responseData?.settlements) ? responseData.settlements.length : 0,
+          closingItemsCount,
+          balance: typeof responseData?.balance === 'number' ? responseData.balance : null,
+          dataCount: Array.isArray(windowData) ? windowData.length : 0,
         });
 
         if (Array.isArray(windowData) && windowData.length > 0) {
