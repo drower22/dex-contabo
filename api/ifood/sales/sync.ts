@@ -42,6 +42,7 @@ async function fetchSalesPage(
   endDate: string,
   page: number
 ): Promise<{ sales: any[]; hasMore: boolean }> {
+  const DEFAULT_PAGE_SIZE = 20;
   const path = `/financial/v3.0/merchants/${merchantId}/sales?beginSalesDate=${beginDate}&endSalesDate=${endDate}&page=${page}`;
   const url = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(path)}`;
 
@@ -97,10 +98,25 @@ async function fetchSalesPage(
   });
   
   const sales = data.sales || [];
+  // IMPORTANT:
+  // Alguns tenants retornam `size` como "quantidade de vendas nesta página" (não o pageSize).
+  // Isso fazia a heurística achar que sempre tem próxima página, gerando requests extras
+  // e ruído de "Invalid page ... pageCount = N".
+  const pageCountRaw =
+    typeof data.pageCount === 'number'
+      ? data.pageCount
+      : typeof data.totalPages === 'number'
+        ? data.totalPages
+        : typeof data.pages === 'number'
+          ? data.pages
+          : null;
+
   const hasMore =
     typeof data.hasMore === 'boolean'
       ? data.hasMore
-      : sales.length > 0 && sales.length === (data.size || 20);
+      : typeof pageCountRaw === 'number'
+        ? page < pageCountRaw
+        : sales.length > 0 && sales.length === DEFAULT_PAGE_SIZE;
 
   console.log(`✅ [syncIfoodSales] Página ${page}: ${sales.length} vendas | hasMore: ${hasMore}`);
   return { sales, hasMore };
