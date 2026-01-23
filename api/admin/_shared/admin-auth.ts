@@ -20,6 +20,12 @@ function parseAllowlist(raw: unknown): string[] {
 
 export function getAdminEmailAllowlist(): string[] {
   const raw = normalizeEnvValue(process.env.ADMIN_EMAIL_ALLOWLIST);
+  if (process.env.NODE_ENV === 'production') {
+    console.log('[admin-auth] startup env debug', {
+      rawEnvValue: raw,
+      parsedAllowlist: parseAllowlist(raw),
+    });
+  }
   return parseAllowlist(raw);
 }
 
