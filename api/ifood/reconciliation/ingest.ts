@@ -32,6 +32,16 @@ const POLL_INTERVAL_MS = 5000; // 5 segundos
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 /**
  * Handler principal para ingestão de conciliação
  * POST /api/ingest/ifood-reconciliation
@@ -676,70 +686,100 @@ export default async function handler(req: Request, res: Response) {
         details: insertError.message,
       });
     }
-    // 10. Disparar processamento Python em background (não bloqueante)
+    // 10. Disparar processamento Python
     const processEndpoint = process.env.BACKEND_PROCESS_URL || 'http://127.0.0.1:8000/processar-planilha-conciliacao';
 
+    const pythonPayload = {
+      file_id: receivedFileId,
+      storage_path: storagePath,
+    };
+
+    let pythonStatus: number | null = null;
+    let pythonOk = false;
+    let pythonBodyText: string | null = null;
+    let pythonErrorMessage: string | null = null;
+
     try {
-      fetch(processEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const response = await fetchWithTimeout(
+        processEndpoint,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(pythonPayload),
         },
-        body: JSON.stringify({
-          file_id: receivedFileId,
-          storage_path: storagePath,
-          // layout_hint opcional: pode ser 'legacy' ou 'v3'. Deixando em branco para auto-detecção.
-        }),
-      })
-        .then(async (response) => {
-          const text = await response.text();
-          console.log('[reconciliation-ingest] Python processing trigger response', {
-            traceId,
-            status: response.status,
-            ok: response.ok,
-            body: text?.slice(0, 500),
-          });
-          await logToDb(
-            response.ok ? 'info' : 'error',
-            'processing',
-            'Resposta do backend Python ao disparo de processamento',
-            {
-              status: response.status,
-              ok: response.ok,
-              body: text?.slice(0, 200),
-            },
-          );
-        })
-        .catch((err: any) => {
-          console.error('[reconciliation-ingest] Failed to trigger Python processing', {
-            traceId,
-            error: err?.message,
-          });
-          logCentral('error', 'ifood_conciliation.error', accountId ?? null, {
-            feature: 'ifood_conciliation',
-            system: 'dex-api',
-            stage: 'python_trigger',
-            status: 'error',
-            run_id: runId,
-            trace_id: traceId,
-            storage_path: storagePath,
-            file_id: receivedFileId,
-            error_stage: 'python_trigger',
-            error_message: err?.message,
-          });
-          logToDb('error', 'processing', 'Erro ao disparar processamento no backend Python', {
-            error: err?.message,
-            endpoint: processEndpoint,
-          });
-        });
-    } catch (err: any) {
-      console.error('[reconciliation-ingest] Error scheduling Python processing', {
+        8000,
+      );
+
+      pythonStatus = response.status;
+      pythonOk = response.ok;
+      pythonBodyText = await response.text().catch(() => null);
+
+      console.log('[reconciliation-ingest] Python processing trigger response', {
         traceId,
-        error: err?.message,
+        status: pythonStatus,
+        ok: pythonOk,
+        body: (pythonBodyText || '').slice(0, 500),
       });
-      await logToDb('error', 'processing', 'Erro ao agendar processamento no backend Python', {
-        error: err?.message,
+
+      await logToDb(
+        pythonOk ? 'info' : 'error',
+        'processing',
+        pythonOk ? 'Processamento disparado no backend Python' : 'Erro ao disparar processamento no backend Python',
+        {
+          status: pythonStatus,
+          ok: pythonOk,
+          body: (pythonBodyText || '').slice(0, 500),
+          endpoint: processEndpoint,
+        },
+      );
+
+      if (!pythonOk) {
+        pythonErrorMessage = `HTTP ${pythonStatus}`;
+      }
+    } catch (err: any) {
+      pythonOk = false;
+      pythonErrorMessage = err?.name === 'AbortError' ? 'timeout' : err?.message;
+      console.error('[reconciliation-ingest] Failed to trigger Python processing', {
+        traceId,
+        error: pythonErrorMessage,
+      });
+      await logToDb('error', 'processing', 'Erro ao disparar processamento no backend Python', {
+        error: pythonErrorMessage,
         endpoint: processEndpoint,
+      });
+      await logCentral('error', 'ifood_conciliation.error', accountId ?? null, {
+        feature: 'ifood_conciliation',
+        system: 'dex-api',
+        stage: 'python_trigger',
+        status: 'error',
+        run_id: runId,
+        trace_id: traceId,
+        storage_path: storagePath,
+        file_id: receivedFileId,
+        error_stage: 'python_trigger',
+        error_message: pythonErrorMessage,
+      });
+    }
+
+    if (!pythonOk) {
+      await persistRun({ status: 'error', finished_at: new Date().toISOString(), error_message: 'python_trigger_failed' });
+      return res.status(502).json({
+        success: false,
+        error: 'Falha ao disparar processamento no backend Python',
+        details: {
+          endpoint: processEndpoint,
+          status: pythonStatus,
+          body: pythonBodyText?.slice(0, 500) ?? null,
+          error: pythonErrorMessage,
+        },
+        runId,
+        traceId,
+        receivedFileId,
+        storagePath,
+        competence,
+        requestId,
       });
     }
 
@@ -777,6 +817,8 @@ export default async function handler(req: Request, res: Response) {
       storagePath,
       competence,
       traceId,
+      runId,
+      receivedFileId,
       message: 'Relatório solicitado, baixado e registrado para processamento'
     });
 
