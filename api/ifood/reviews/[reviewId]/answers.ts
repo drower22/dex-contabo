@@ -49,21 +49,6 @@ async function resolveAccountIdByMerchantId(merchantId: string): Promise<string 
     // ignore
   }
 
-  try {
-    await supabase.from('ifood_reviews_events').insert({
-      event_type: 'review_replied',
-      account_id: accountId,
-      merchant_id: merchantId,
-      review_id: reviewId,
-      trace_id: params.traceId,
-      metadata: {
-        ai_suggestion_id: params.aiSuggestionId ?? null,
-      },
-    } as any);
-  } catch {
-    // best-effort
-  }
-
   const supabase = getSupabaseServiceClient();
   if (!supabase) return null;
 
