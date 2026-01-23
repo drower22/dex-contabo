@@ -318,12 +318,18 @@ export async function syncIfoodSales(req: Request, res: Response) {
       console.log('🚀 [API] POST /api/ifood/sales/sync - Iniciando sync direto');
       
       const {
-        accountId,
-        merchantId,
+        accountId: accountIdRaw,
+        storeId,
+        merchantId: merchantIdRaw,
         periodStart: periodStartRaw,
         periodEnd: periodEndRaw,
         syncMode,
+        syncType,
+        mode,
       } = req.body;
+
+      const accountId = String(accountIdRaw || storeId || '').trim();
+      const merchantId = String(merchantIdRaw || '').trim();
 
       // Validações
       if (!accountId || !merchantId) {
@@ -332,12 +338,14 @@ export async function syncIfoodSales(req: Request, res: Response) {
         });
       }
 
-      const mode = syncMode === 'backfill' || syncMode === 'incremental' ? syncMode : 'incremental';
+      const requestedMode = syncMode ?? syncType ?? mode;
+      const normalizedMode =
+        requestedMode === 'backfill' || requestedMode === 'incremental' ? requestedMode : 'incremental';
 
       const hasExplicitPeriod = Boolean(periodStartRaw && periodEndRaw);
 
       const computedRange =
-        mode === 'incremental' && !hasExplicitPeriod
+        normalizedMode === 'incremental' && !hasExplicitPeriod
           ? await computeIncrementalSyncRange(accountId, merchantId, 3, 30)
           : null;
 
@@ -362,7 +370,7 @@ export async function syncIfoodSales(req: Request, res: Response) {
         });
       }
 
-      console.log('📋 [API] Parâmetros:', { accountId, merchantId, periodStart, periodEnd, syncMode: mode });
+      console.log('📋 [API] Parâmetros:', { accountId, merchantId, periodStart, periodEnd, syncMode: normalizedMode });
 
       const nowIso = new Date().toISOString();
 
@@ -511,7 +519,7 @@ export async function syncIfoodSales(req: Request, res: Response) {
         });
       }
 
-      const shouldDelete = mode === 'backfill' || hasExplicitPeriod;
+      const shouldDelete = normalizedMode === 'backfill' || hasExplicitPeriod;
       if (shouldDelete) {
         // 4. Limpar vendas existentes no período antes de salvar novas (somente para backfill/manual)
         console.log('🧹 [syncIfoodSales] Limpando vendas existentes no período antes de salvar novas...', {
@@ -519,7 +527,7 @@ export async function syncIfoodSales(req: Request, res: Response) {
           merchantId,
           periodStart,
           periodEnd,
-          syncMode: mode,
+          syncMode: normalizedMode,
         });
 
         const { error: deleteError } = await supabase
