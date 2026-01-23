@@ -36,18 +36,31 @@ export function getBearerToken(headerValue: unknown): string | null {
 
 export async function requireAdminUser(req: any): Promise<{ email: string; userId: string } | null> {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    console.warn('[admin-auth] missing supabase config', {
+      hasUrl: Boolean(SUPABASE_URL),
+      hasServiceRoleKey: Boolean(SUPABASE_SERVICE_ROLE_KEY),
+    });
     throw new Error('SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not configured');
   }
 
   const token = getBearerToken(req.headers?.authorization ?? req.headers?.Authorization);
-  if (!token) return null;
+  if (!token) {
+    console.warn('[admin-auth] missing bearer token');
+    return null;
+  }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
   const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user) return null;
+  if (error || !data?.user) {
+    console.warn('[admin-auth] getUser failed', {
+      message: error?.message ?? null,
+      hasUser: Boolean(data?.user),
+    });
+    return null;
+  }
 
   const email = String(data.user.email || '').toLowerCase();
   const userId = String(data.user.id || '');
@@ -56,7 +69,15 @@ export async function requireAdminUser(req: any): Promise<{ email: string; userI
   const allowlist = getAdminEmailAllowlist();
   const allowEmptyAllowlistInDev = process.env.NODE_ENV !== 'production' && allowlist.length === 0;
   const allowed = allowEmptyAllowlistInDev || allowlist.includes(email);
-  if (!allowed) return null;
+  if (!allowed) {
+    console.warn('[admin-auth] email not allowlisted', {
+      email,
+      allowlistCount: allowlist.length,
+      nodeEnv: process.env.NODE_ENV,
+      allowEmptyAllowlistInDev,
+    });
+    return null;
+  }
 
   return { email, userId };
 }
