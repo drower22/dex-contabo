@@ -63,12 +63,6 @@ async function fetchSalesPage(
   if (!response.ok) {
     const errorText = await response.text();
 
-    if (response.status === 400) {
-      console.warn(`⚠️ [syncIfoodSales] Status 400 na página ${page}:`, errorText);
-      // Fim das páginas
-      return { sales: [], hasMore: false };
-    }
-
     // Caso comum de loja sem vendas no período: tratar como 0 vendas em vez de erro
     if (response.status === 404 && errorText.includes('No sales found between')) {
       console.warn(`⚠️ [syncIfoodSales] Nenhuma venda encontrada no período para a página ${page}:`, errorText);
@@ -89,7 +83,7 @@ async function fetchSalesPage(
   });
   
   const sales = data.sales || [];
-  const hasMore = sales.length > 0 && sales.length === (data.size || 20);
+  const hasMore = Boolean(data.hasMore);
 
   console.log(`✅ [syncIfoodSales] Página ${page}: ${sales.length} vendas | hasMore: ${hasMore}`);
   return { sales, hasMore };
@@ -276,7 +270,7 @@ export async function syncIfoodSales(req: Request, res: Response) {
       for (const chunk of chunks) {
         console.log(`📦 [API] Processando chunk: ${chunk.start} a ${chunk.end}`);
         
-        let page = 1;
+        let page = 0;
         let hasMore = true;
 
         while (hasMore) {
@@ -285,11 +279,11 @@ export async function syncIfoodSales(req: Request, res: Response) {
           );
           allSales.push(...sales);
           hasMore = more;
-          page++;
+          page += 1;
           totalPages++;
 
           // Limite de segurança (max 100 páginas por chunk)
-          if (page > 100) {
+          if (page >= 100) {
             console.warn(`⚠️ [syncIfoodSales] Limite de 100 páginas atingido no chunk ${chunk.start}-${chunk.end}`);
             break;
           }

@@ -11,6 +11,94 @@ const REVIEWS_DETAIL_RATE_LIMIT_MS = Number(process.env.REVIEWS_DETAIL_RATE_LIMI
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+async function createSyncRun(args: {
+  traceId: string;
+  accountId: string;
+  merchantId: string;
+  mode: string;
+  dateFrom: string;
+  dateTo: string;
+}): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from('ifood_reviews_sync_runs')
+      .insert({
+        trace_id: args.traceId,
+        account_id: args.accountId,
+        merchant_id: args.merchantId,
+        mode: args.mode,
+        date_from: args.dateFrom,
+        date_to: args.dateTo,
+        status: 'running',
+      } as any)
+      .select('id')
+      .maybeSingle();
+
+    const id = (data as any)?.id;
+    return typeof id === 'string' && id.trim() ? id.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function finishSyncRun(args: {
+  runId: string | null;
+  status: 'success' | 'error';
+  fetched: number;
+  saved: number;
+  replies_saved: number;
+  questions_saved: number;
+  question_answers_saved: number;
+  details_saved: number;
+  detail_fetched: number;
+  detail_errors: number;
+  pages: number;
+  error_message?: string;
+}) {
+  if (!args.runId) return;
+  try {
+    await supabase
+      .from('ifood_reviews_sync_runs')
+      .update({
+        status: args.status,
+        fetched: args.fetched,
+        saved: args.saved,
+        replies_saved: args.replies_saved,
+        questions_saved: args.questions_saved,
+        question_answers_saved: args.question_answers_saved,
+        details_saved: args.details_saved,
+        detail_fetched: args.detail_fetched,
+        detail_errors: args.detail_errors,
+        pages: args.pages,
+        error_message: args.error_message ?? null,
+        finished_at: new Date().toISOString(),
+      } as any)
+      .eq('id', args.runId);
+  } catch {
+    // best-effort
+  }
+}
+
+async function logReviewsEvent(args: {
+  event_type: string;
+  trace_id: string;
+  account_id?: string;
+  merchant_id?: string;
+  metadata?: any;
+}) {
+  try {
+    await supabase.from('ifood_reviews_events').insert({
+      event_type: args.event_type,
+      trace_id: args.trace_id,
+      account_id: args.account_id ?? null,
+      merchant_id: args.merchant_id ?? null,
+      metadata: args.metadata ?? {},
+    } as any);
+  } catch {
+    // best-effort
+  }
+}
+
 type SyncMode = 'backfill' | 'incremental';
 
 async function getIfoodToken(accountId: string, traceId: string): Promise<string> {
@@ -544,6 +632,22 @@ export default async function handler(req: Request, res: ExpressResponse) {
       dateTo = range.dateTo;
     }
 
+    const syncRunId = await createSyncRun({
+      traceId,
+      accountId: String(accountId),
+      merchantId: String(merchantId),
+      mode: syncMode,
+      dateFrom,
+      dateTo,
+    });
+    await logReviewsEvent({
+      event_type: 'reviews_sync_started',
+      trace_id: traceId,
+      account_id: String(accountId),
+      merchant_id: String(merchantId),
+      metadata: { mode: syncMode, dateFrom, dateTo, run_id: syncRunId },
+    });
+
     const token = await getIfoodToken(String(accountId), traceId);
 
     const pageSize = 50;
@@ -719,6 +823,37 @@ export default async function handler(req: Request, res: ExpressResponse) {
 
     const detailsSaved = await upsertReviewDetails({ rows: detailRows, traceId });
 
+    await finishSyncRun({
+      runId: syncRunId,
+      status: 'success',
+      fetched: totalFetched,
+      saved,
+      replies_saved: repliesSaved,
+      questions_saved: questionsSaved,
+      question_answers_saved: answersSaved,
+      details_saved: detailsSaved,
+      detail_fetched: detailFetched,
+      detail_errors: detailErrors,
+      pages: page - 1,
+    });
+    await logReviewsEvent({
+      event_type: 'reviews_sync_finished',
+      trace_id: traceId,
+      account_id: String(accountId),
+      merchant_id: String(merchantId),
+      metadata: {
+        mode: syncMode,
+        fetched: totalFetched,
+        saved,
+        replies_saved: repliesSaved,
+        details_saved: detailsSaved,
+        detail_fetched: detailFetched,
+        detail_errors: detailErrors,
+        pages: page - 1,
+        run_id: syncRunId,
+      },
+    });
+
     return res.status(200).json({
       success: true,
       trace_id: traceId,
@@ -737,6 +872,15 @@ export default async function handler(req: Request, res: ExpressResponse) {
       pages: page - 1,
     });
   } catch (e: any) {
+    try {
+      await logReviewsEvent({
+        event_type: 'reviews_sync_error',
+        trace_id: traceId,
+        metadata: { message: e?.message || String(e) },
+      });
+    } catch {
+      // ignore
+    }
     console.error('[reviews-sync] error', { trace_id: traceId, message: e?.message || String(e) });
     return res.status(500).json({
       error: 'reviews_sync_failed',

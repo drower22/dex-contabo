@@ -163,6 +163,8 @@ const adminIfoodJobsHandler = loadHandler('./admin/ifood/jobs');
 const adminLogsHandler = loadHandler('./admin/logs');
 const adminIfoodJobsRetryHandler = loadHandler('./admin/ifood/jobs-retry');
 const adminIfoodJobsRunNowHandler = loadHandler('./admin/ifood/jobs-run-now');
+const adminAgenciesHandler = loadHandler('./admin/agencies');
+const adminAccountsHandler = loadHandler('./admin/accounts');
 
 // DEBUG: Verificar carregamento dos handlers
 console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
@@ -267,6 +269,24 @@ if (adminIfoodJobsRunNowHandler) {
 } else {
   app.post('/api/admin/ifood/jobs/:jobId/run-now', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Admin iFood jobs run-now handler not loaded' });
+  });
+}
+
+if (adminAgenciesHandler) {
+  app.get('/api/admin/agencies', adaptVercelHandler(adminAgenciesHandler));
+  console.log('✅ Admin agencies handler loaded');
+} else {
+  app.get('/api/admin/agencies', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin agencies handler not loaded' });
+  });
+}
+
+if (adminAccountsHandler) {
+  app.get('/api/admin/accounts', adaptVercelHandler(adminAccountsHandler));
+  console.log('✅ Admin accounts handler loaded');
+} else {
+  app.get('/api/admin/accounts', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin accounts handler not loaded' });
   });
 }
 

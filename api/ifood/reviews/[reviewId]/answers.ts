@@ -49,6 +49,21 @@ async function resolveAccountIdByMerchantId(merchantId: string): Promise<string 
     // ignore
   }
 
+  try {
+    await supabase.from('ifood_reviews_events').insert({
+      event_type: 'review_replied',
+      account_id: accountId,
+      merchant_id: merchantId,
+      review_id: reviewId,
+      trace_id: params.traceId,
+      metadata: {
+        ai_suggestion_id: params.aiSuggestionId ?? null,
+      },
+    } as any);
+  } catch {
+    // best-effort
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) return null;
 
@@ -69,6 +84,7 @@ async function persistReplyToSupabase(params: {
   reviewId: string;
   merchantId: string;
   replyText: string;
+  aiSuggestionId?: string | null;
   traceId: string;
 }) {
   const supabase = getSupabaseServiceClient();
@@ -104,6 +120,8 @@ async function persistReplyToSupabase(params: {
       merchant_id: merchantId,
       text: replyText,
       created_at: nowIso,
+      ai_suggestion_id: params.aiSuggestionId ?? null,
+      generated_by_ai: Boolean(params.aiSuggestionId),
     } as any);
 
   if (insertError) {
@@ -291,8 +309,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const rawBody = (req as any)?.body;
         const bodyObj = typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;
         const replyText = String(bodyObj?.text ?? '').trim();
+        const aiSuggestionId = bodyObj?.aiSuggestionId ? String(bodyObj.aiSuggestionId).trim() : null;
         if (replyText) {
-          await persistReplyToSupabase({ reviewId: String(reviewId), merchantId, replyText, traceId });
+          await persistReplyToSupabase({ reviewId: String(reviewId), merchantId, replyText, aiSuggestionId, traceId });
         }
       } catch (e: any) {
         console.warn('[ifood-reviews-answers] persist reply best-effort failed', { traceId, err: e?.message || String(e) });
