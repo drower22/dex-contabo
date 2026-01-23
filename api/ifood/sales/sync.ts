@@ -13,6 +13,65 @@ const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+function formatDateYYYYMMDD(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
+function addDaysToDateString(dateStr: string, days: number): string {
+  const base = new Date(`${dateStr}T00:00:00Z`);
+  base.setUTCDate(base.getUTCDate() + days);
+  return formatDateYYYYMMDD(base);
+}
+
+function getTargetEndDate(): string {
+  const now = new Date();
+  const localMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  localMidnight.setDate(localMidnight.getDate() - 1);
+  return formatDateYYYYMMDD(localMidnight);
+}
+
+async function computeIncrementalSyncRange(
+  accountId: string,
+  merchantId: string,
+  overlapDays: number,
+  initialLookbackDays: number
+): Promise<{ periodStart: string; periodEnd: string } | null> {
+  const targetEnd = getTargetEndDate();
+
+  const { data: lastCompleted, error } = await supabase
+    .from('ifood_sales_sync_status')
+    .select('period_end')
+    .eq('account_id', accountId)
+    .eq('merchant_id', merchantId)
+    .eq('status', 'completed')
+    .order('period_end', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('❌ [syncIfoodSales] Erro ao buscar último sync completed (ifood_sales_sync_status):', {
+      message: (error as any).message,
+      details: (error as any).details,
+      hint: (error as any).hint,
+      code: (error as any).code,
+    });
+  }
+
+  const lastEnd = (lastCompleted as any)?.period_end as string | null;
+
+  let startDate: string;
+  if (lastEnd) {
+    // overlapDays=3 => reprocessa lastEnd-2, lastEnd-1, lastEnd, ...
+    startDate = addDaysToDateString(lastEnd, 1 - overlapDays);
+  } else {
+    startDate = addDaysToDateString(targetEnd, -initialLookbackDays);
+  }
+
+  if (startDate > targetEnd) return null;
+
+  return { periodStart: startDate, periodEnd: targetEnd };
+}
+
 /**
  * Obter token do iFood via Edge Function
  */
@@ -258,16 +317,89 @@ export async function syncIfoodSales(req: Request, res: Response) {
     try {
       console.log('🚀 [API] POST /api/ifood/sales/sync - Iniciando sync direto');
       
-      const { accountId, merchantId, periodStart, periodEnd } = req.body;
+      const {
+        accountId,
+        merchantId,
+        periodStart: periodStartRaw,
+        periodEnd: periodEndRaw,
+        syncMode,
+      } = req.body;
 
       // Validações
-      if (!accountId || !merchantId || !periodStart || !periodEnd) {
+      if (!accountId || !merchantId) {
         return res.status(400).json({
-          error: 'Parâmetros obrigatórios: accountId, merchantId, periodStart, periodEnd',
+          error: 'Parâmetros obrigatórios: accountId, merchantId',
         });
       }
 
-      console.log('📋 [API] Parâmetros:', { accountId, merchantId, periodStart, periodEnd });
+      const mode = syncMode === 'backfill' || syncMode === 'incremental' ? syncMode : 'incremental';
+
+      const hasExplicitPeriod = Boolean(periodStartRaw && periodEndRaw);
+
+      const computedRange =
+        mode === 'incremental' && !hasExplicitPeriod
+          ? await computeIncrementalSyncRange(accountId, merchantId, 3, 30)
+          : null;
+
+      const periodStart = hasExplicitPeriod
+        ? String(periodStartRaw)
+        : computedRange?.periodStart;
+      const periodEnd = hasExplicitPeriod
+        ? String(periodEndRaw)
+        : computedRange?.periodEnd;
+
+      if (!periodStart || !periodEnd) {
+        return res.status(200).json({
+          success: true,
+          message: 'Nenhum período pendente para sincronização incremental',
+          data: {
+            salesSynced: 0,
+            totalPages: 0,
+            totalChunks: 0,
+            periodStart: null,
+            periodEnd: null,
+          },
+        });
+      }
+
+      console.log('📋 [API] Parâmetros:', { accountId, merchantId, periodStart, periodEnd, syncMode: mode });
+
+      const nowIso = new Date().toISOString();
+
+      // Registrar status (best-effort; se falhar não deve impedir o sync)
+      try {
+        const { error: statusUpsertError } = await supabase
+          .from('ifood_sales_sync_status')
+          .upsert(
+            {
+              account_id: accountId,
+              merchant_id: merchantId,
+              period_start: periodStart,
+              period_end: periodEnd,
+              status: 'in_progress',
+              started_at: nowIso,
+              completed_at: null,
+              last_error: null,
+            },
+            {
+              onConflict: 'account_id,merchant_id,period_start,period_end',
+            }
+          );
+
+        if (statusUpsertError) {
+          console.error('❌ [syncIfoodSales] Erro ao upsert ifood_sales_sync_status (in_progress):', {
+            message: (statusUpsertError as any).message,
+            details: (statusUpsertError as any).details,
+            hint: (statusUpsertError as any).hint,
+            code: (statusUpsertError as any).code,
+          });
+        }
+      } catch (e: any) {
+        console.error('❌ [syncIfoodSales] Exceção ao registrar ifood_sales_sync_status (in_progress):', {
+          message: e?.message,
+          stack: e?.stack,
+        });
+      }
 
       // 1. Obter token
       const token = await getIfoodToken(accountId);
@@ -336,6 +468,36 @@ export async function syncIfoodSales(req: Request, res: Response) {
           totalPages,
         });
 
+        try {
+          const { error: statusUpdateError } = await supabase
+            .from('ifood_sales_sync_status')
+            .update({
+              status: 'completed',
+              completed_at: new Date().toISOString(),
+              total_sales: 0,
+              total_pages: totalPages,
+              last_error: null,
+            })
+            .eq('account_id', accountId)
+            .eq('merchant_id', merchantId)
+            .eq('period_start', periodStart)
+            .eq('period_end', periodEnd);
+
+          if (statusUpdateError) {
+            console.error('❌ [syncIfoodSales] Erro ao atualizar ifood_sales_sync_status (completed/0 sales):', {
+              message: (statusUpdateError as any).message,
+              details: (statusUpdateError as any).details,
+              hint: (statusUpdateError as any).hint,
+              code: (statusUpdateError as any).code,
+            });
+          }
+        } catch (e: any) {
+          console.error('❌ [syncIfoodSales] Exceção ao atualizar ifood_sales_sync_status (completed/0 sales):', {
+            message: e?.message,
+            stack: e?.stack,
+          });
+        }
+
         return res.status(200).json({
           success: true,
           message: 'Sincronização concluída (nenhuma venda retornada pela API)',
@@ -349,29 +511,70 @@ export async function syncIfoodSales(req: Request, res: Response) {
         });
       }
 
-      // 4. Limpar vendas existentes no período antes de salvar novas
-      console.log('🧹 [syncIfoodSales] Limpando vendas existentes no período antes de salvar novas...', {
-        accountId,
-        merchantId,
-        periodStart,
-        periodEnd,
-      });
+      const shouldDelete = mode === 'backfill' || hasExplicitPeriod;
+      if (shouldDelete) {
+        // 4. Limpar vendas existentes no período antes de salvar novas (somente para backfill/manual)
+        console.log('🧹 [syncIfoodSales] Limpando vendas existentes no período antes de salvar novas...', {
+          accountId,
+          merchantId,
+          periodStart,
+          periodEnd,
+          syncMode: mode,
+        });
 
-      const { error: deleteError } = await supabase
-        .from('ifood_sales')
-        .delete()
-        .eq('account_id', accountId)
-        .eq('merchant_id', merchantId)
-        .gte('created_at', `${periodStart}T00:00:00`)
-        .lte('created_at', `${periodEnd}T23:59:59.999Z`);
+        const { error: deleteError } = await supabase
+          .from('ifood_sales')
+          .delete()
+          .eq('account_id', accountId)
+          .eq('merchant_id', merchantId)
+          .gte('created_at', `${periodStart}T00:00:00`)
+          .lte('created_at', `${periodEnd}T23:59:59.999Z`);
 
-      if (deleteError) {
-        console.error('❌ [syncIfoodSales] Erro ao limpar vendas existentes no período:', deleteError);
-        throw new Error('Erro ao limpar vendas existentes no período');
+        if (deleteError) {
+          console.error('❌ [syncIfoodSales] Erro ao limpar vendas existentes no período:', deleteError);
+          throw new Error('Erro ao limpar vendas existentes no período');
+        }
+      } else {
+        console.log('♻️ [syncIfoodSales] Modo incremental: pulando delete e fazendo apenas upsert (idempotente).', {
+          accountId,
+          merchantId,
+          periodStart,
+          periodEnd,
+        });
       }
 
       // 5. Salvar no banco
       const savedCount = await saveSales(allSales, accountId, merchantId);
+
+      try {
+        const { error: statusUpdateError } = await supabase
+          .from('ifood_sales_sync_status')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            total_sales: savedCount,
+            total_pages: totalPages,
+            last_error: null,
+          })
+          .eq('account_id', accountId)
+          .eq('merchant_id', merchantId)
+          .eq('period_start', periodStart)
+          .eq('period_end', periodEnd);
+
+        if (statusUpdateError) {
+          console.error('❌ [syncIfoodSales] Erro ao atualizar ifood_sales_sync_status (completed):', {
+            message: (statusUpdateError as any).message,
+            details: (statusUpdateError as any).details,
+            hint: (statusUpdateError as any).hint,
+            code: (statusUpdateError as any).code,
+          });
+        }
+      } catch (e: any) {
+        console.error('❌ [syncIfoodSales] Exceção ao atualizar ifood_sales_sync_status (completed):', {
+          message: e?.message,
+          stack: e?.stack,
+        });
+      }
 
       console.log(`✅ [API] Sync concluído: ${savedCount} vendas sincronizadas em ${chunks.length} chunks`);
 
@@ -389,6 +592,62 @@ export async function syncIfoodSales(req: Request, res: Response) {
 
     } catch (error: any) {
       console.error('❌ [API] Erro no sync:', error);
+
+      try {
+        const {
+          accountId,
+          merchantId,
+          periodStart: periodStartRaw,
+          periodEnd: periodEndRaw,
+          syncMode,
+        } = req.body || {};
+
+        if (accountId && merchantId) {
+          const mode = syncMode === 'backfill' || syncMode === 'incremental' ? syncMode : 'incremental';
+          const hasExplicitPeriod = Boolean(periodStartRaw && periodEndRaw);
+
+          const fallbackRange =
+            !hasExplicitPeriod && mode === 'incremental'
+              ? await computeIncrementalSyncRange(String(accountId), String(merchantId), 3, 30)
+              : null;
+
+          const periodStart = hasExplicitPeriod
+            ? String(periodStartRaw)
+            : fallbackRange?.periodStart;
+          const periodEnd = hasExplicitPeriod
+            ? String(periodEndRaw)
+            : fallbackRange?.periodEnd;
+
+          if (periodStart && periodEnd) {
+            const { error: statusUpdateError } = await supabase
+              .from('ifood_sales_sync_status')
+              .update({
+                status: 'failed',
+                completed_at: new Date().toISOString(),
+                last_error: String(error?.message || error).slice(0, 500),
+              })
+              .eq('account_id', accountId)
+              .eq('merchant_id', merchantId)
+              .eq('period_start', periodStart)
+              .eq('period_end', periodEnd);
+
+            if (statusUpdateError) {
+              console.error('❌ [syncIfoodSales] Erro ao atualizar ifood_sales_sync_status (failed):', {
+                message: (statusUpdateError as any).message,
+                details: (statusUpdateError as any).details,
+                hint: (statusUpdateError as any).hint,
+                code: (statusUpdateError as any).code,
+              });
+            }
+          }
+        }
+      } catch (e: any) {
+        console.error('❌ [syncIfoodSales] Exceção ao atualizar ifood_sales_sync_status (failed):', {
+          message: e?.message,
+          stack: e?.stack,
+        });
+      }
+
       return res.status(500).json({
         error: 'Erro ao sincronizar vendas',
         message: error.message,
