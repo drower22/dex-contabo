@@ -143,16 +143,51 @@ async function markJobRetry(job: IfoodJob, errorMessage: string) {
   }
 }
 
+async function getMerchantIdFromAuth(accountId: string): Promise<string | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('auth')
+      .select('ifood_merchant_id')
+      .eq('account_id', accountId)
+      .not('ifood_merchant_id', 'is', null)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[ifood-reviews-worker] Erro ao buscar merchant_id na auth:', {
+        accountId,
+        error: error.message,
+      });
+      return null;
+    }
+
+    return (data as any)?.ifood_merchant_id || null;
+  } catch (err: any) {
+    console.error('[ifood-reviews-worker] Exceção ao buscar merchant_id na auth:', {
+      accountId,
+      message: err?.message || String(err),
+    });
+    return null;
+  }
+}
+
 async function processJob(job: IfoodJob) {
-  if (!job.account_id || !job.merchant_id) {
-    await markJobRetry(job, 'Dados incompletos no job (account_id/merchant_id ausentes).');
-    return;
+  let merchantId = job.merchant_id;
+
+  if (!merchantId) {
+    console.log('[ifood-reviews-worker] Job sem merchant_id, buscando na auth...', { jobId: job.id, accountId: job.account_id });
+    merchantId = await getMerchantIdFromAuth(job.account_id);
+    if (!merchantId) {
+      await markJobRetry(job, 'merchant_id ausente e não encontrado na tabela auth para esta account.');
+      return;
+    }
   }
 
   const url = `${DEX_API_BASE_URL}/api/ifood/reviews/sync`;
   const body = {
     accountId: job.account_id,
-    merchantId: job.merchant_id,
+    merchantId,
     mode: 'incremental',
     days: 30,
   };
@@ -161,7 +196,7 @@ async function processJob(job: IfoodJob) {
     console.log('[ifood-reviews-worker] Disparando reviews sync', {
       jobId: job.id,
       accountId: job.account_id,
-      merchantId: job.merchant_id,
+      merchantId,
       url,
     });
 
