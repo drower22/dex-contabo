@@ -94,12 +94,25 @@ export default async function handler(req: any, res: any) {
     }
 
     const expectedSecret = (process.env.CRON_SECRET || '').trim();
+    // eslint-disable-next-line no-console
+    console.log('[ifood-schedule-jobs] env', {
+      hasCronSecret: Boolean(expectedSecret),
+      cronSecretLen: expectedSecret ? expectedSecret.length : 0,
+      hasSupabaseUrl: Boolean((process.env.SUPABASE_URL || '').trim()),
+      hasServiceRoleKey: Boolean((process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()),
+    });
     if (!expectedSecret) {
       res.status(500).json({ error: 'CRON_SECRET not configured' });
       return;
     }
 
     const token = getBearerToken(req.headers?.authorization ?? req.headers?.Authorization);
+    // eslint-disable-next-line no-console
+    console.log('[ifood-schedule-jobs] auth', {
+      hasAuthHeader: Boolean(req.headers?.authorization ?? req.headers?.Authorization),
+      tokenLen: token ? token.length : 0,
+      tokenPreview: token ? `${token.slice(0, 4)}...${token.slice(-4)}` : null,
+    });
     if (!token || token !== expectedSecret) {
       res.status(401).json({ error: 'Unauthorized' });
       return;

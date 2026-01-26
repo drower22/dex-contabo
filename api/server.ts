@@ -12,8 +12,28 @@ import dotenv from 'dotenv';
 import path from 'path';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Carregar .env
-dotenv.config({ path: path.join(__dirname, '..', '.env') });
+// Carregar .env (suporta execução via ts-node (api/) e via build (dist/api/))
+const envCandidates = [
+  path.join(process.cwd(), '.env'),
+  path.join(__dirname, '..', '.env'),
+  path.join(__dirname, '..', '..', '.env'),
+];
+
+let envLoadedFrom: string | null = null;
+for (const p of envCandidates) {
+  const result = dotenv.config({ path: p });
+  if (!result.error) {
+    envLoadedFrom = p;
+    break;
+  }
+}
+
+console.log('[env] cwd:', process.cwd());
+console.log('[env] __dirname:', __dirname);
+console.log('[env] loaded_from:', envLoadedFrom);
+console.log('[env] has CRON_SECRET:', Boolean((process.env.CRON_SECRET || '').trim()));
+console.log('[env] has SUPABASE_URL:', Boolean((process.env.SUPABASE_URL || '').trim()));
+console.log('[env] has SUPABASE_SERVICE_ROLE_KEY:', Boolean((process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -117,11 +137,17 @@ console.log('🔄 Loading iFood API TypeScript handlers...');
 // Helper para carregar handler com fallback
 function loadHandler(modulePath: string) {
   try {
-    const module = require(modulePath);
+    const resolved = path.resolve(__dirname, modulePath);
+    const module = require(resolved);
     // Tentar pegar o export default ou o export nomeado
     return module.default || module;
   } catch (error: any) {
-    console.error(`❌ Failed to load ${modulePath}:`, error.message);
+    const resolved = path.resolve(__dirname, modulePath);
+    console.error(`❌ Failed to load ${modulePath}`);
+    console.error('   resolved:', resolved);
+    console.error('   cwd:', process.cwd());
+    console.error('   error:', error?.message || error);
+    if (error?.stack) console.error(error.stack);
     return null;
   }
 }
@@ -170,6 +196,7 @@ const adminAccountsHandler = loadHandler('./admin/accounts');
 // DEBUG: Verificar carregamento dos handlers
 console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
 console.log('🔍 DEBUG settlementsHandler:', settlementsHandler ? 'LOADED ✅' : 'NULL ❌');
+console.log('🔍 DEBUG adminIfoodGlobalScheduleHandler:', adminIfoodGlobalScheduleHandler ? 'LOADED ✅' : 'NULL ❌');
 if (salesSyncHandler) {
   console.log('🔍 DEBUG salesSyncHandler exports:', Object.keys(salesSyncHandler));
 }
