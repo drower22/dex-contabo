@@ -1,4 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Garantir carregamento do .env mesmo quando o PM2 não injeta env_file
+dotenv.config({ path: path.join(process.cwd(), '.env') });
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
