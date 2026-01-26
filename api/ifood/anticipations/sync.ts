@@ -18,7 +18,7 @@
 
 import type { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import axios from 'axios';
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
@@ -293,23 +293,39 @@ export default async function handler(req: Request, res: Response) {
       return closingItems.map((item: any) => {
         const accountDetails = item?.accountDetails ?? {};
 
+        const originalPaymentDate = item?.originalPaymentDate
+          ? String(item.originalPaymentDate).slice(0, 10)
+          : null;
+        const anticipatedPaymentDate = item?.anticipatedPaymentDate
+          ? String(item.anticipatedPaymentDate).slice(0, 10)
+          : null;
+        const type = item?.type ?? null;
+        const originalPaymentAmount = item?.originalPaymentAmount ?? 0;
+        const anticipationIdKey = [
+          merchantId,
+          startCalc,
+          endCalc,
+          type,
+          originalPaymentDate,
+          anticipatedPaymentDate,
+          String(originalPaymentAmount),
+        ].join('|');
+        const anticipationId = createHash('sha1').update(anticipationIdKey).digest('hex');
+
         return {
           account_id: accountId,
           merchant_id: merchantId,
-          anticipation_id: null,
+          anticipation_id: anticipationId,
           // Valores financeiros principais
-          original_payment_amount: item?.originalPaymentAmount ?? 0,
+          original_payment_amount: originalPaymentAmount,
           fee_percentage: item?.feePercentage ?? null,
           fee_amount: item?.feeAmount ?? 0,
           anticipated_payment_amount: item?.anticipatedPaymentAmount ?? 0,
           net_amount: item?.anticipatedPaymentAmount ?? 0,
           // Datas
-          anticipation_date: item?.anticipatedPaymentDate
-            ? String(item.anticipatedPaymentDate).slice(0, 10)
-            : null,
-          original_payment_date: item?.originalPaymentDate
-            ? String(item.originalPaymentDate).slice(0, 10)
-            : null,
+          anticipation_date: anticipatedPaymentDate,
+          original_payment_date: originalPaymentDate,
+          anticipated_payment_date: anticipatedPaymentDate,
           // Campos de período (usar informações do bloco de closingItems + range global)
           start_date_calculation: startCalc,
           end_date_calculation: endCalc,
