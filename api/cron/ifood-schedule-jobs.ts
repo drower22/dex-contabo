@@ -14,6 +14,57 @@ const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
     })
   : null;
 
+function normalizeTime(raw: string): string | null {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return null;
+  if (!/^\d{2}:\d{2}(:\d{2})?$/.test(trimmed)) return null;
+  return trimmed.length === 5 ? `${trimmed}:00` : trimmed;
+}
+
+function asLocalDateParts(nowUtc: Date, tzOffsetMinutes: number): { y: number; m: number; d: number; dow: number } {
+  const localMs = nowUtc.getTime() - tzOffsetMinutes * 60_000;
+  const local = new Date(localMs);
+  return {
+    y: local.getUTCFullYear(),
+    m: local.getUTCMonth() + 1,
+    d: local.getUTCDate(),
+    dow: local.getUTCDay(),
+  };
+}
+
+function buildUtcFromLocalDateTime(
+  parts: { y: number; m: number; d: number },
+  time: string,
+  tzOffsetMinutes: number,
+) {
+  const [hh, mm, ss] = time.split(':').map((p) => Number.parseInt(p, 10));
+  const localUtcMs = Date.UTC(parts.y, parts.m - 1, parts.d, hh || 0, mm || 0, ss || 0);
+  return new Date(localUtcMs + tzOffsetMinutes * 60_000);
+}
+
+function computeScheduledFor(
+  nowUtc: Date,
+  windowStart: string,
+  windowEnd: string,
+  index: number,
+  total: number,
+  tzOffsetMinutes: number,
+): string {
+  const local = asLocalDateParts(nowUtc, tzOffsetMinutes);
+  const startUtc = buildUtcFromLocalDateTime({ y: local.y, m: local.m, d: local.d }, windowStart, tzOffsetMinutes);
+  const endUtc = buildUtcFromLocalDateTime({ y: local.y, m: local.m, d: local.d }, windowEnd, tzOffsetMinutes);
+
+  const start = startUtc.getTime();
+  const end = endUtc.getTime();
+  const min = Math.min(start, end);
+  const max = Math.max(start, end);
+  const span = Math.max(1, max - min);
+  const t = total > 1 ? index / (total - 1) : 0;
+  const scheduled = new Date(min + Math.floor(span * t));
+  const nowMs = nowUtc.getTime();
+  return new Date(Math.max(nowMs, scheduled.getTime())).toISOString();
+}
+
 function getBearerToken(headerValue: unknown): string | null {
   if (!headerValue) return null;
   const raw = Array.isArray(headerValue) ? headerValue[0] : String(headerValue);
@@ -63,70 +114,157 @@ export default async function handler(req: any, res: any) {
     const competence = getCurrentCompetence(body.competence);
     const dryRun = Boolean(body.dryRun);
 
-    const { data: schedules, error: schedulesError } = await supabase
-      .from('ifood_schedules')
-      .select('account_id, merchant_id, enabled, run_conciliation, run_sales_sync')
-      .eq('enabled', true);
+    const { data: globalSchedule, error: globalErr } = await supabase
+      .from('ifood_global_schedule')
+      .select('*')
+      .eq('id', 1)
+      .maybeSingle();
 
-    if (schedulesError) {
+    if (globalErr) {
       // eslint-disable-next-line no-console
-      console.error('[ifood-schedule-jobs] Falha ao buscar ifood_schedules:', schedulesError.message);
-      res.status(500).json({ error: 'Failed to fetch schedules', details: schedulesError.message });
+      console.error('[ifood-schedule-jobs] Falha ao buscar ifood_global_schedule:', globalErr.message);
+      res.status(500).json({ error: 'Failed to fetch global schedule', details: globalErr.message });
       return;
     }
 
-    const baseSchedules = (schedules || []).filter((row: any) => row.account_id && row.merchant_id);
-    const conciliationSchedules = baseSchedules.filter((row: any) => row.run_conciliation);
-    const salesSyncSchedules = baseSchedules.filter((row: any) => row.run_sales_sync);
+    if (!globalSchedule || globalSchedule.enabled === false) {
+      res.status(200).json({
+        message: 'Global schedule disabled',
+        competence,
+      });
+      return;
+    }
+
+    const windowStart = normalizeTime(String(globalSchedule.window_start || '03:00:00')) || '03:00:00';
+    const windowEnd = normalizeTime(String(globalSchedule.window_end || '06:00:00')) || '06:00:00';
+
+    const runConciliation = Boolean(globalSchedule.run_conciliation);
+    const runSalesSync = Boolean(globalSchedule.run_sales_sync);
+    const runSettlementsWeekly = Boolean(globalSchedule.run_settlements_weekly);
+    const runAnticipationsDaily = Boolean(globalSchedule.run_anticipations_daily);
+    const runReconciliationStatus = Boolean(globalSchedule.run_reconciliation_status);
+
+    const tz = String(globalSchedule.timezone || 'America/Sao_Paulo');
+    const tzOffsetMinutes = tz === 'America/Sao_Paulo' ? 180 : 180;
+
+    const { data: accounts, error: accountsError } = await supabase
+      .from('accounts')
+      .select('id, ifood_merchant_id, is_active')
+      .eq('is_active', true)
+      .not('ifood_merchant_id', 'is', null);
+
+    if (accountsError) {
+      // eslint-disable-next-line no-console
+      console.error('[ifood-schedule-jobs] Falha ao buscar accounts:', accountsError.message);
+      res.status(500).json({ error: 'Failed to fetch accounts', details: accountsError.message });
+      return;
+    }
+
+    const baseAccounts = (accounts || []).filter((row: any) => row?.id && row?.ifood_merchant_id);
 
     if (dryRun) {
       res.status(200).json({
         message: 'Dry run - no jobs inserted',
         competence,
-        total_schedules: baseSchedules.length,
-        conciliation_schedules: conciliationSchedules.length,
-        sales_sync_schedules: salesSyncSchedules.length,
+        total_accounts: baseAccounts.length,
+        window_start: windowStart,
+        window_end: windowEnd,
+        timezone: tz,
+        run_conciliation: runConciliation,
+        run_sales_sync: runSalesSync,
+        run_settlements_weekly: runSettlementsWeekly,
+        run_anticipations_daily: runAnticipationsDaily,
+        run_reconciliation_status: runReconciliationStatus,
       });
       return;
     }
 
-    if (conciliationSchedules.length === 0 && salesSyncSchedules.length === 0) {
+    if (baseAccounts.length === 0) {
       res.status(200).json({
-        message: 'No enabled schedules for conciliation or sales_sync',
+        message: 'No active accounts with ifood_merchant_id',
         competence,
-        total_schedules: baseSchedules.length,
-        conciliation_schedules: 0,
-        sales_sync_schedules: 0,
-        inserted_conciliation: 0,
-        inserted_sales_sync: 0,
+        total_accounts: 0,
       });
       return;
     }
 
     const now = new Date();
-    const nowIso = now.toISOString();
-    const jobDay = now.toISOString().slice(0, 10); // YYYY-MM-DD
-    const dayOfWeek = now.getUTCDay(); // 0=domingo, 1=segunda, ... (usar UTC para evitar timezone do servidor)
+    const jobDay = now.toISOString().slice(0, 10);
+    const local = asLocalDateParts(now, tzOffsetMinutes);
 
     let conciliationInserted = 0;
     let salesSyncInserted = 0;
+    let anticipationsDailyInserted = 0;
     let reconciliationStatusInserted = 0;
     let settlementsWeeklyInserted = 0;
 
-    if (conciliationSchedules.length > 0) {
-      const conciliationJobsPayload = conciliationSchedules.map((row: any) => ({
-        job_type: 'conciliation',
-        account_id: row.account_id,
-        merchant_id: row.merchant_id,
-        competence,
-        scheduled_for: nowIso,
-        job_day: jobDay,
-        status: 'pending',
-      }));
+    const total = baseAccounts.length;
 
+    const conciliationPayload = runConciliation
+      ? baseAccounts.map((row: any, idx: number) => ({
+          job_type: 'conciliation',
+          account_id: row.id,
+          merchant_id: row.ifood_merchant_id,
+          competence,
+          scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
+          job_day: jobDay,
+          status: 'pending',
+        }))
+      : [];
+
+    const salesSyncPayload = runSalesSync
+      ? baseAccounts.map((row: any, idx: number) => ({
+          job_type: 'sales_sync',
+          account_id: row.id,
+          merchant_id: row.ifood_merchant_id,
+          competence: null,
+          scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
+          job_day: jobDay,
+          status: 'pending',
+        }))
+      : [];
+
+    const anticipationsPayload = runAnticipationsDaily
+      ? baseAccounts.map((row: any, idx: number) => ({
+          job_type: 'anticipations_daily',
+          account_id: row.id,
+          merchant_id: row.ifood_merchant_id,
+          competence: null,
+          scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
+          job_day: jobDay,
+          status: 'pending',
+        }))
+      : [];
+
+    const statusPayload = runReconciliationStatus
+      ? baseAccounts.map((row: any, idx: number) => ({
+          job_type: 'reconciliation_status',
+          account_id: row.id,
+          merchant_id: row.ifood_merchant_id,
+          competence: null,
+          scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
+          job_day: jobDay,
+          status: 'pending',
+        }))
+      : [];
+
+    const isMondayLocal = local.dow === 1;
+    const settlementsPayload = runSettlementsWeekly && isMondayLocal
+      ? baseAccounts.map((row: any, idx: number) => ({
+          job_type: 'settlements_weekly',
+          account_id: row.id,
+          merchant_id: row.ifood_merchant_id,
+          competence: null,
+          scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
+          job_day: jobDay,
+          status: 'pending',
+        }))
+      : [];
+
+    if (conciliationPayload.length > 0) {
       const { error: insertError } = await supabase
         .from('ifood_jobs')
-        .upsert(conciliationJobsPayload, {
+        .upsert(conciliationPayload, {
           onConflict: 'job_type,account_id,competence,job_day',
           ignoreDuplicates: true,
         });
@@ -138,107 +276,94 @@ export default async function handler(req: any, res: any) {
         return;
       }
 
-      conciliationInserted = conciliationJobsPayload.length;
+      conciliationInserted = conciliationPayload.length;
     }
 
-    if (salesSyncSchedules.length > 0) {
-      const salesJobsPayload = salesSyncSchedules.map((row: any) => ({
-        job_type: 'sales_sync',
-        account_id: row.account_id,
-        merchant_id: row.merchant_id,
-        competence: null,
-        scheduled_for: nowIso,
-        status: 'pending',
-      }));
-
+    if (salesSyncPayload.length > 0) {
       const { error: insertSalesError } = await supabase
         .from('ifood_jobs')
-        .insert(salesJobsPayload);
-
-      if (insertSalesError) {
-        // eslint-disable-next-line no-console
-        console.error('[ifood-schedule-jobs] Falha ao criar jobs de sales_sync em ifood_jobs:', insertSalesError.message);
-        res.status(500).json({ error: 'Failed to insert sales_sync jobs', details: insertSalesError.message });
-        return;
-      }
-
-      salesSyncInserted = salesJobsPayload.length;
-    }
-
-    // Criar jobs semanais de settlements (repasses) toda segunda-feira
-    // Consideramos segunda-feira em UTC para simplificar (ajuste fino pode ser feito via horário do cron)
-    if (dayOfWeek === 1) {
-      const settlementsWeeklySchedules = conciliationSchedules; // usar mesmas lojas da conciliação por padrão
-
-      if (settlementsWeeklySchedules.length > 0) {
-        const settlementsWeeklyJobsPayload = settlementsWeeklySchedules.map((row: any) => ({
-          job_type: 'settlements_weekly',
-          account_id: row.account_id,
-          merchant_id: row.merchant_id,
-          competence: null,
-          scheduled_for: nowIso,
-          job_day: jobDay,
-          status: 'pending',
-        }));
-
-        const { error: insertSettlementsWeeklyError } = await supabase
-          .from('ifood_jobs')
-          .upsert(settlementsWeeklyJobsPayload, {
-            onConflict: 'job_type,account_id,job_day',
-            ignoreDuplicates: true,
-          });
-
-        if (insertSettlementsWeeklyError) {
-          // eslint-disable-next-line no-console
-          console.error('[ifood-schedule-jobs] Falha ao criar jobs de settlements_weekly em ifood_jobs:', insertSettlementsWeeklyError.message);
-          res.status(500).json({ error: 'Failed to upsert settlements_weekly jobs', details: insertSettlementsWeeklyError.message });
-          return;
-        }
-
-        settlementsWeeklyInserted = settlementsWeeklyJobsPayload.length;
-      }
-    }
-
-    // Criar jobs de reconciliation_status para todas as lojas ativas
-    if (baseSchedules.length > 0) {
-      const reconciliationStatusJobsPayload = baseSchedules.map((row: any) => ({
-        job_type: 'reconciliation_status',
-        account_id: row.account_id,
-        merchant_id: row.merchant_id,
-        competence: null, // Jobs de status não são por competência
-        scheduled_for: nowIso,
-        job_day: jobDay,
-        status: 'pending',
-      }));
-
-      const { error: insertReconciliationStatusError } = await supabase
-        .from('ifood_jobs')
-        .upsert(reconciliationStatusJobsPayload, {
+        .upsert(salesSyncPayload, {
           onConflict: 'job_type,account_id,job_day',
           ignoreDuplicates: true,
         });
 
-      if (insertReconciliationStatusError) {
+      if (insertSalesError) {
         // eslint-disable-next-line no-console
-        console.error('[ifood-schedule-jobs] Falha ao criar jobs de reconciliation_status em ifood_jobs:', insertReconciliationStatusError.message);
-        res.status(500).json({ error: 'Failed to upsert reconciliation_status jobs', details: insertReconciliationStatusError.message });
+        console.error('[ifood-schedule-jobs] Falha ao criar jobs de sales_sync em ifood_jobs:', insertSalesError.message);
+        res.status(500).json({ error: 'Failed to upsert sales_sync jobs', details: insertSalesError.message });
         return;
       }
 
-      reconciliationStatusInserted = reconciliationStatusJobsPayload.length;
+      salesSyncInserted = salesSyncPayload.length;
+    }
+
+    if (anticipationsPayload.length > 0) {
+      const { error: insertAnticipationsError } = await supabase
+        .from('ifood_jobs')
+        .upsert(anticipationsPayload, {
+          onConflict: 'job_type,account_id,job_day',
+          ignoreDuplicates: true,
+        });
+
+      if (insertAnticipationsError) {
+        // eslint-disable-next-line no-console
+        console.error('[ifood-schedule-jobs] Falha ao criar jobs de anticipations_daily em ifood_jobs:', insertAnticipationsError.message);
+        res.status(500).json({ error: 'Failed to upsert anticipations_daily jobs', details: insertAnticipationsError.message });
+        return;
+      }
+
+      anticipationsDailyInserted = anticipationsPayload.length;
+    }
+
+    if (settlementsPayload.length > 0) {
+      const { error: insertSettlementsError } = await supabase
+        .from('ifood_jobs')
+        .upsert(settlementsPayload, {
+          onConflict: 'job_type,account_id,job_day',
+          ignoreDuplicates: true,
+        });
+
+      if (insertSettlementsError) {
+        // eslint-disable-next-line no-console
+        console.error('[ifood-schedule-jobs] Falha ao criar jobs de settlements_weekly em ifood_jobs:', insertSettlementsError.message);
+        res.status(500).json({ error: 'Failed to upsert settlements_weekly jobs', details: insertSettlementsError.message });
+        return;
+      }
+
+      settlementsWeeklyInserted = settlementsPayload.length;
+    }
+
+    if (statusPayload.length > 0) {
+      const { error: insertStatusError } = await supabase
+        .from('ifood_jobs')
+        .upsert(statusPayload, {
+          onConflict: 'job_type,account_id,job_day',
+          ignoreDuplicates: true,
+        });
+
+      if (insertStatusError) {
+        // eslint-disable-next-line no-console
+        console.error('[ifood-schedule-jobs] Falha ao criar jobs de reconciliation_status em ifood_jobs:', insertStatusError.message);
+        res.status(500).json({ error: 'Failed to upsert reconciliation_status jobs', details: insertStatusError.message });
+        return;
+      }
+
+      reconciliationStatusInserted = statusPayload.length;
     }
 
     res.status(200).json({
       message: 'iFood jobs scheduled',
       competence,
-      total_schedules: baseSchedules.length,
-      conciliation_schedules: conciliationSchedules.length,
-      sales_sync_schedules: salesSyncSchedules.length,
+      total_accounts: baseAccounts.length,
+      window_start: windowStart,
+      window_end: windowEnd,
+      timezone: tz,
       inserted_conciliation: conciliationInserted,
       inserted_sales_sync: salesSyncInserted,
+      inserted_anticipations_daily: anticipationsDailyInserted,
       inserted_reconciliation_status: reconciliationStatusInserted,
       inserted_settlements_weekly: settlementsWeeklyInserted,
-      is_monday_utc: dayOfWeek === 1,
+      is_monday_local: isMondayLocal,
     });
   } catch (err: any) {
     // eslint-disable-next-line no-console

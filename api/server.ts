@@ -163,6 +163,7 @@ const adminIfoodJobsHandler = loadHandler('./admin/ifood/jobs');
 const adminLogsHandler = loadHandler('./admin/logs');
 const adminIfoodJobsRetryHandler = loadHandler('./admin/ifood/jobs-retry');
 const adminIfoodJobsRunNowHandler = loadHandler('./admin/ifood/jobs-run-now');
+const adminIfoodGlobalScheduleHandler = loadHandler('./admin/ifood/global-schedule');
 const adminAgenciesHandler = loadHandler('./admin/agencies');
 const adminAccountsHandler = loadHandler('./admin/accounts');
 
@@ -269,6 +270,19 @@ if (adminIfoodJobsRunNowHandler) {
 } else {
   app.post('/api/admin/ifood/jobs/:jobId/run-now', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Admin iFood jobs run-now handler not loaded' });
+  });
+}
+
+if (adminIfoodGlobalScheduleHandler) {
+  app.get('/api/admin/ifood/global-schedule', adaptVercelHandler(adminIfoodGlobalScheduleHandler));
+  app.put('/api/admin/ifood/global-schedule', adaptVercelHandler(adminIfoodGlobalScheduleHandler));
+  console.log('✅ Admin iFood global schedule handler loaded');
+} else {
+  app.get('/api/admin/ifood/global-schedule', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin iFood global schedule handler not loaded' });
+  });
+  app.put('/api/admin/ifood/global-schedule', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin iFood global schedule handler not loaded' });
   });
 }
 
