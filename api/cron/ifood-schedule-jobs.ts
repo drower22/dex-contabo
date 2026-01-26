@@ -156,6 +156,7 @@ export default async function handler(req: any, res: any) {
     const runSettlementsWeekly = Boolean(globalSchedule.run_settlements_weekly);
     const runAnticipationsDaily = Boolean(globalSchedule.run_anticipations_daily);
     const runReconciliationStatus = Boolean(globalSchedule.run_reconciliation_status);
+    const runReviewsSync = Boolean((globalSchedule as any).run_reviews_sync);
 
     const tz = String(globalSchedule.timezone || 'America/Sao_Paulo');
     const tzOffsetMinutes = tz === 'America/Sao_Paulo' ? 180 : 180;
@@ -188,6 +189,7 @@ export default async function handler(req: any, res: any) {
         run_settlements_weekly: runSettlementsWeekly,
         run_anticipations_daily: runAnticipationsDaily,
         run_reconciliation_status: runReconciliationStatus,
+        run_reviews_sync: runReviewsSync,
       });
       return;
     }
@@ -210,6 +212,7 @@ export default async function handler(req: any, res: any) {
     let anticipationsDailyInserted = 0;
     let reconciliationStatusInserted = 0;
     let settlementsWeeklyInserted = 0;
+    let reviewsSyncInserted = 0;
 
     const total = baseAccounts.length;
 
@@ -252,6 +255,18 @@ export default async function handler(req: any, res: any) {
     const statusPayload = runReconciliationStatus
       ? baseAccounts.map((row: any, idx: number) => ({
           job_type: 'reconciliation_status',
+          account_id: row.id,
+          merchant_id: row.ifood_merchant_id,
+          competence: null,
+          scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
+          job_day: jobDay,
+          status: 'pending',
+        }))
+      : [];
+
+    const reviewsPayload = runReviewsSync
+      ? baseAccounts.map((row: any, idx: number) => ({
+          job_type: 'reviews_sync',
           account_id: row.id,
           merchant_id: row.ifood_merchant_id,
           competence: null,
@@ -364,6 +379,24 @@ export default async function handler(req: any, res: any) {
       reconciliationStatusInserted = statusPayload.length;
     }
 
+    if (reviewsPayload.length > 0) {
+      const { error: insertReviewsError } = await supabase
+        .from('ifood_jobs')
+        .upsert(reviewsPayload, {
+          onConflict: 'job_type,account_id,job_day',
+          ignoreDuplicates: true,
+        });
+
+      if (insertReviewsError) {
+        // eslint-disable-next-line no-console
+        console.error('[ifood-schedule-jobs] Falha ao criar jobs de reviews_sync em ifood_jobs:', insertReviewsError.message);
+        res.status(500).json({ error: 'Failed to upsert reviews_sync jobs', details: insertReviewsError.message });
+        return;
+      }
+
+      reviewsSyncInserted = reviewsPayload.length;
+    }
+
     res.status(200).json({
       message: 'iFood jobs scheduled',
       competence,
@@ -376,6 +409,7 @@ export default async function handler(req: any, res: any) {
       inserted_anticipations_daily: anticipationsDailyInserted,
       inserted_reconciliation_status: reconciliationStatusInserted,
       inserted_settlements_weekly: settlementsWeeklyInserted,
+      inserted_reviews_sync: reviewsSyncInserted,
       is_monday_local: isMondayLocal,
     });
   } catch (err: any) {

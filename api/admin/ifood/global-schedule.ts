@@ -62,6 +62,7 @@ export default async function handler(req: any, res: any) {
       const runSettlementsWeekly = pickBoolean(body, 'run_settlements_weekly') ?? pickBoolean(body, 'runSettlementsWeekly');
       const runAnticipationsDaily = pickBoolean(body, 'run_anticipations_daily') ?? pickBoolean(body, 'runAnticipationsDaily');
       const runReconciliationStatus = pickBoolean(body, 'run_reconciliation_status') ?? pickBoolean(body, 'runReconciliationStatus');
+      const runReviewsSync = pickBoolean(body, 'run_reviews_sync') ?? pickBoolean(body, 'runReviewsSync');
 
       const patch: any = {
         updated_at: new Date().toISOString(),
@@ -76,6 +77,7 @@ export default async function handler(req: any, res: any) {
       if (runSettlementsWeekly !== null) patch.run_settlements_weekly = runSettlementsWeekly;
       if (runAnticipationsDaily !== null) patch.run_anticipations_daily = runAnticipationsDaily;
       if (runReconciliationStatus !== null) patch.run_reconciliation_status = runReconciliationStatus;
+      if (runReviewsSync !== null) patch.run_reviews_sync = runReviewsSync;
 
       const { data: updated, error: updErr } = await supabase
         .from('ifood_global_schedule')
