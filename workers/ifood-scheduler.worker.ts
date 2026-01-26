@@ -2,6 +2,7 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
+import { logError, logEvent } from '../services/app-logger';
 
 /**
  * Worker Scheduler para criar jobs automáticos na fila ifood_jobs
@@ -26,15 +27,30 @@ dotenv.config({ path: path.join(__dirname, '..', '.env') });
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 
-console.log('[ifood-scheduler] ENV DEBUG', {
-  cwd: process.cwd(),
-  dirname: __dirname,
-  hasSupabaseUrl: !!SUPABASE_URL,
-  hasServiceRole: !!SUPABASE_SERVICE_ROLE_KEY,
+void logEvent({
+  level: 'debug',
+  marketplace: 'ifood',
+  source: 'dex-contabo/worker',
+  service: 'ifood-scheduler-worker',
+  event: 'worker.env',
+  message: 'Env check',
+  trace_id: 'boot',
+  data: {
+    cwd: process.cwd(),
+    dirname: __dirname,
+    hasSupabaseUrl: !!SUPABASE_URL,
+    hasServiceRole: !!SUPABASE_SERVICE_ROLE_KEY,
+  },
 });
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('[ifood-scheduler] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados.');
+  void logError({
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-scheduler-worker',
+    event: 'worker.env.missing',
+    message: 'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados.',
+  });
   process.exit(1);
 }
 
@@ -70,7 +86,14 @@ async function getActiveAccounts(): Promise<Account[]> {
     .not('ifood_merchant_id', 'is', null);
 
   if (error) {
-    console.error('[ifood-scheduler] Erro ao buscar contas ativas:', error.message);
+    await logError({
+      marketplace: 'ifood',
+      source: 'dex-contabo/worker',
+      service: 'ifood-scheduler-worker',
+      event: 'ifood.scheduler.fetch_accounts.error',
+      message: 'Erro ao buscar contas ativas',
+      err: error,
+    });
     return [];
   }
 
@@ -94,7 +117,15 @@ async function jobExistsForToday(
     .maybeSingle();
 
   if (error) {
-    console.error('[ifood-scheduler] Erro ao verificar job existente:', error.message);
+    await logError({
+      marketplace: 'ifood',
+      source: 'dex-contabo/worker',
+      service: 'ifood-scheduler-worker',
+      event: 'ifood.scheduler.job_exists.error',
+      message: 'Erro ao verificar job existente',
+      err: error,
+      data: { accountId, jobType, jobDay },
+    });
     return false;
   }
 
@@ -132,12 +163,14 @@ async function scheduleSettlementsWeekly() {
   const totalCreated = existingCount || 0;
   const totalAccounts = accounts.length;
 
-  console.log('[ifood-scheduler] Agendando settlements_weekly (distribuído)', {
-    jobDay,
-    totalAccounts,
-    totalCreated,
-    remaining: totalAccounts - totalCreated,
-    batchSize: BATCH_SIZE,
+  await logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-scheduler-worker',
+    event: 'ifood.scheduler.settlements_weekly.batch_start',
+    message: 'Agendando settlements_weekly (distribuído)',
+    data: { jobDay, totalAccounts, totalCreated, remaining: totalAccounts - totalCreated, batchSize: BATCH_SIZE },
   });
 
   // Se já criou todos, retorna
@@ -169,26 +202,37 @@ async function scheduleSettlementsWeekly() {
     });
 
     if (error) {
-      console.error('[ifood-scheduler] Erro ao criar job settlements_weekly', {
-        accountId: account.id,
-        error: error.message,
+      await logError({
+        marketplace: 'ifood',
+        source: 'dex-contabo/worker',
+        service: 'ifood-scheduler-worker',
+        event: 'ifood.scheduler.settlements_weekly.insert.error',
+        message: 'Erro ao criar job settlements_weekly',
+        err: error,
+        data: { accountId: account.id, merchantId: account.ifood_merchant_id, jobDay },
       });
     } else {
-      console.log('[ifood-scheduler] Job settlements_weekly criado', {
-        accountId: account.id,
-        merchantId: account.ifood_merchant_id,
-        jobDay,
-        scheduledFor,
+      await logEvent({
+        level: 'info',
+        marketplace: 'ifood',
+        source: 'dex-contabo/worker',
+        service: 'ifood-scheduler-worker',
+        event: 'ifood.scheduler.settlements_weekly.insert.success',
+        message: 'Job settlements_weekly criado',
+        data: { accountId: account.id, merchantId: account.ifood_merchant_id, jobDay, scheduledFor },
       });
       created++;
     }
   }
 
-  console.log('[ifood-scheduler] Batch de settlements criado', {
-    created,
-    totalCreated: totalCreated + created,
-    totalAccounts,
-    progress: `${Math.round(((totalCreated + created) / totalAccounts) * 100)}%`,
+  await logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-scheduler-worker',
+    event: 'ifood.scheduler.settlements_weekly.batch_finish',
+    message: 'Batch de settlements criado',
+    data: { created, totalCreated: totalCreated + created, totalAccounts },
   });
 }
 
@@ -222,12 +266,14 @@ async function scheduleAnticipationsDaily() {
   const totalCreated = existingCount || 0;
   const totalAccounts = accounts.length;
 
-  console.log('[ifood-scheduler] Agendando anticipations_daily (distribuído)', {
-    jobDay,
-    totalAccounts,
-    totalCreated,
-    remaining: totalAccounts - totalCreated,
-    batchSize: BATCH_SIZE,
+  await logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-scheduler-worker',
+    event: 'ifood.scheduler.anticipations_daily.batch_start',
+    message: 'Agendando anticipations_daily (distribuído)',
+    data: { jobDay, totalAccounts, totalCreated, remaining: totalAccounts - totalCreated, batchSize: BATCH_SIZE },
   });
 
   // Se já criou todos, retorna
@@ -259,26 +305,37 @@ async function scheduleAnticipationsDaily() {
     });
 
     if (error) {
-      console.error('[ifood-scheduler] Erro ao criar job anticipations_daily', {
-        accountId: account.id,
-        error: error.message,
+      await logError({
+        marketplace: 'ifood',
+        source: 'dex-contabo/worker',
+        service: 'ifood-scheduler-worker',
+        event: 'ifood.scheduler.anticipations_daily.insert.error',
+        message: 'Erro ao criar job anticipations_daily',
+        err: error,
+        data: { accountId: account.id, merchantId: account.ifood_merchant_id, jobDay },
       });
     } else {
-      console.log('[ifood-scheduler] Job anticipations_daily criado', {
-        accountId: account.id,
-        merchantId: account.ifood_merchant_id,
-        jobDay,
-        scheduledFor,
+      await logEvent({
+        level: 'info',
+        marketplace: 'ifood',
+        source: 'dex-contabo/worker',
+        service: 'ifood-scheduler-worker',
+        event: 'ifood.scheduler.anticipations_daily.insert.success',
+        message: 'Job anticipations_daily criado',
+        data: { accountId: account.id, merchantId: account.ifood_merchant_id, jobDay, scheduledFor },
       });
       created++;
     }
   }
 
-  console.log('[ifood-scheduler] Batch de anticipations criado', {
-    created,
-    totalCreated: totalCreated + created,
-    totalAccounts,
-    progress: `${Math.round(((totalCreated + created) / totalAccounts) * 100)}%`,
+  await logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-scheduler-worker',
+    event: 'ifood.scheduler.anticipations_daily.batch_finish',
+    message: 'Batch de anticipations criado',
+    data: { created, totalCreated: totalCreated + created, totalAccounts },
   });
 }
 
@@ -287,14 +344,28 @@ async function tick() {
     await scheduleSettlementsWeekly();
     await scheduleAnticipationsDaily();
   } catch (err: any) {
-    console.error('[ifood-scheduler] Erro no tick:', err?.message || err);
+    await logError({
+      marketplace: 'ifood',
+      source: 'dex-contabo/worker',
+      service: 'ifood-scheduler-worker',
+      event: 'worker.tick.error',
+      message: 'Erro no tick',
+      trace_id: WORKER_ID,
+      err,
+    });
   }
 }
 
 async function main() {
-  console.log('[ifood-scheduler] Iniciado', {
-    workerId: WORKER_ID,
-    checkIntervalMs: CHECK_INTERVAL_MS,
+  await logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-scheduler-worker',
+    event: 'worker.start',
+    message: 'Worker iniciado',
+    trace_id: WORKER_ID,
+    data: { checkIntervalMs: CHECK_INTERVAL_MS },
   });
 
   // Loop principal
@@ -306,16 +377,44 @@ async function main() {
 }
 
 main().catch((err) => {
+  void logError({
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-scheduler-worker',
+    event: 'worker.fatal',
+    message: 'Falha ao iniciar scheduler',
+    trace_id: WORKER_ID,
+    err,
+  });
+  // eslint-disable-next-line no-console
   console.error('[ifood-scheduler] Falha ao iniciar scheduler:', err?.message || err);
   process.exit(1);
 });
 
 process.on('SIGTERM', () => {
-  console.log('[ifood-scheduler] Recebido SIGTERM, encerrando...');
+  void logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-scheduler-worker',
+    event: 'worker.signal',
+    message: 'Recebido SIGTERM, encerrando...',
+    trace_id: WORKER_ID,
+    data: { signal: 'SIGTERM' },
+  });
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('[ifood-scheduler] Recebido SIGINT, encerrando...');
+  void logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-scheduler-worker',
+    event: 'worker.signal',
+    message: 'Recebido SIGINT, encerrando...',
+    trace_id: WORKER_ID,
+    data: { signal: 'SIGINT' },
+  });
   process.exit(0);
 });

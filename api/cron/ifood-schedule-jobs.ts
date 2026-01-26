@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { logError, logEvent } from '../../services/app-logger';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
@@ -93,27 +94,64 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    const traceId = (req.headers?.['x-trace-id'] || req.headers?.['x-request-id'] || `${Date.now()}-${Math.random().toString(16).slice(2)}`) as string;
+
     const expectedSecret = (process.env.CRON_SECRET || '').trim();
-    // eslint-disable-next-line no-console
-    console.log('[ifood-schedule-jobs] env', {
-      hasCronSecret: Boolean(expectedSecret),
-      cronSecretLen: expectedSecret ? expectedSecret.length : 0,
-      hasSupabaseUrl: Boolean((process.env.SUPABASE_URL || '').trim()),
-      hasServiceRoleKey: Boolean((process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()),
+
+    await logEvent({
+      level: 'debug',
+      marketplace: 'ifood',
+      source: 'dex-contabo/api',
+      service: 'ifood-schedule-jobs',
+      event: 'ifood.schedule.env',
+      message: 'Env check',
+      trace_id: traceId,
+      data: {
+        hasCronSecret: Boolean(expectedSecret),
+        cronSecretLen: expectedSecret ? expectedSecret.length : 0,
+        hasSupabaseUrl: Boolean((process.env.SUPABASE_URL || '').trim()),
+        hasServiceRoleKey: Boolean((process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()),
+      },
     });
     if (!expectedSecret) {
+      await logError({
+        marketplace: 'ifood',
+        source: 'dex-contabo/api',
+        service: 'ifood-schedule-jobs',
+        event: 'ifood.schedule.error',
+        message: 'CRON_SECRET not configured',
+        trace_id: traceId,
+      });
       res.status(500).json({ error: 'CRON_SECRET not configured' });
       return;
     }
 
     const token = getBearerToken(req.headers?.authorization ?? req.headers?.Authorization);
-    // eslint-disable-next-line no-console
-    console.log('[ifood-schedule-jobs] auth', {
-      hasAuthHeader: Boolean(req.headers?.authorization ?? req.headers?.Authorization),
-      tokenLen: token ? token.length : 0,
-      tokenPreview: token ? `${token.slice(0, 4)}...${token.slice(-4)}` : null,
+
+    await logEvent({
+      level: 'debug',
+      marketplace: 'ifood',
+      source: 'dex-contabo/api',
+      service: 'ifood-schedule-jobs',
+      event: 'ifood.schedule.auth',
+      message: 'Authorization check',
+      trace_id: traceId,
+      data: {
+        hasAuthHeader: Boolean(req.headers?.authorization ?? req.headers?.Authorization),
+        tokenLen: token ? token.length : 0,
+        tokenPreview: token ? `${token.slice(0, 4)}...${token.slice(-4)}` : null,
+      },
     });
     if (!token || token !== expectedSecret) {
+      await logEvent({
+        level: 'warn',
+        marketplace: 'ifood',
+        source: 'dex-contabo/api',
+        service: 'ifood-schedule-jobs',
+        event: 'ifood.schedule.unauthorized',
+        message: 'Unauthorized',
+        trace_id: traceId,
+      });
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
@@ -134,8 +172,15 @@ export default async function handler(req: any, res: any) {
       .maybeSingle();
 
     if (globalErr) {
-      // eslint-disable-next-line no-console
-      console.error('[ifood-schedule-jobs] Falha ao buscar ifood_global_schedule:', globalErr.message);
+      await logError({
+        marketplace: 'ifood',
+        source: 'dex-contabo/api',
+        service: 'ifood-schedule-jobs',
+        event: 'ifood.schedule.fetch_global_schedule.error',
+        message: 'Failed to fetch global schedule',
+        trace_id: traceId,
+        err: globalErr,
+      });
       res.status(500).json({ error: 'Failed to fetch global schedule', details: globalErr.message });
       return;
     }
@@ -167,8 +212,15 @@ export default async function handler(req: any, res: any) {
       .eq('is_active', true);
 
     if (accountsError) {
-      // eslint-disable-next-line no-console
-      console.error('[ifood-schedule-jobs] Falha ao buscar accounts:', accountsError.message);
+      await logError({
+        marketplace: 'ifood',
+        source: 'dex-contabo/api',
+        service: 'ifood-schedule-jobs',
+        event: 'ifood.schedule.fetch_accounts.error',
+        message: 'Failed to fetch accounts',
+        trace_id: traceId,
+        err: accountsError,
+      });
       res.status(500).json({ error: 'Failed to fetch accounts', details: accountsError.message });
       return;
     }
@@ -297,8 +349,16 @@ export default async function handler(req: any, res: any) {
         });
 
       if (insertError) {
-        // eslint-disable-next-line no-console
-        console.error('[ifood-schedule-jobs] Falha ao criar jobs de conciliação em ifood_jobs:', insertError.message);
+        await logError({
+          marketplace: 'ifood',
+          source: 'dex-contabo/api',
+          service: 'ifood-schedule-jobs',
+          event: 'ifood.jobs.upsert.conciliation.error',
+          message: 'Failed to upsert conciliation jobs',
+          trace_id: traceId,
+          err: insertError,
+          data: { count: conciliationPayload.length },
+        });
         res.status(500).json({ error: 'Failed to upsert conciliation jobs', details: insertError.message });
         return;
       }
@@ -315,8 +375,16 @@ export default async function handler(req: any, res: any) {
         });
 
       if (insertSalesError) {
-        // eslint-disable-next-line no-console
-        console.error('[ifood-schedule-jobs] Falha ao criar jobs de sales_sync em ifood_jobs:', insertSalesError.message);
+        await logError({
+          marketplace: 'ifood',
+          source: 'dex-contabo/api',
+          service: 'ifood-schedule-jobs',
+          event: 'ifood.jobs.upsert.sales_sync.error',
+          message: 'Failed to upsert sales_sync jobs',
+          trace_id: traceId,
+          err: insertSalesError,
+          data: { count: salesSyncPayload.length },
+        });
         res.status(500).json({ error: 'Failed to upsert sales_sync jobs', details: insertSalesError.message });
         return;
       }
@@ -333,8 +401,16 @@ export default async function handler(req: any, res: any) {
         });
 
       if (insertAnticipationsError) {
-        // eslint-disable-next-line no-console
-        console.error('[ifood-schedule-jobs] Falha ao criar jobs de anticipations_daily em ifood_jobs:', insertAnticipationsError.message);
+        await logError({
+          marketplace: 'ifood',
+          source: 'dex-contabo/api',
+          service: 'ifood-schedule-jobs',
+          event: 'ifood.jobs.upsert.anticipations_daily.error',
+          message: 'Failed to upsert anticipations_daily jobs',
+          trace_id: traceId,
+          err: insertAnticipationsError,
+          data: { count: anticipationsPayload.length },
+        });
         res.status(500).json({ error: 'Failed to upsert anticipations_daily jobs', details: insertAnticipationsError.message });
         return;
       }
@@ -351,8 +427,16 @@ export default async function handler(req: any, res: any) {
         });
 
       if (insertSettlementsError) {
-        // eslint-disable-next-line no-console
-        console.error('[ifood-schedule-jobs] Falha ao criar jobs de settlements_weekly em ifood_jobs:', insertSettlementsError.message);
+        await logError({
+          marketplace: 'ifood',
+          source: 'dex-contabo/api',
+          service: 'ifood-schedule-jobs',
+          event: 'ifood.jobs.upsert.settlements_weekly.error',
+          message: 'Failed to upsert settlements_weekly jobs',
+          trace_id: traceId,
+          err: insertSettlementsError,
+          data: { count: settlementsPayload.length },
+        });
         res.status(500).json({ error: 'Failed to upsert settlements_weekly jobs', details: insertSettlementsError.message });
         return;
       }
@@ -369,8 +453,16 @@ export default async function handler(req: any, res: any) {
         });
 
       if (insertStatusError) {
-        // eslint-disable-next-line no-console
-        console.error('[ifood-schedule-jobs] Falha ao criar jobs de reconciliation_status em ifood_jobs:', insertStatusError.message);
+        await logError({
+          marketplace: 'ifood',
+          source: 'dex-contabo/api',
+          service: 'ifood-schedule-jobs',
+          event: 'ifood.jobs.upsert.reconciliation_status.error',
+          message: 'Failed to upsert reconciliation_status jobs',
+          trace_id: traceId,
+          err: insertStatusError,
+          data: { count: statusPayload.length },
+        });
         res.status(500).json({ error: 'Failed to upsert reconciliation_status jobs', details: insertStatusError.message });
         return;
       }
@@ -387,14 +479,46 @@ export default async function handler(req: any, res: any) {
         });
 
       if (insertReviewsError) {
-        // eslint-disable-next-line no-console
-        console.error('[ifood-schedule-jobs] Falha ao criar jobs de reviews_sync em ifood_jobs:', insertReviewsError.message);
+        await logError({
+          marketplace: 'ifood',
+          source: 'dex-contabo/api',
+          service: 'ifood-schedule-jobs',
+          event: 'ifood.jobs.upsert.reviews_sync.error',
+          message: 'Failed to upsert reviews_sync jobs',
+          trace_id: traceId,
+          err: insertReviewsError,
+          data: { count: reviewsPayload.length },
+        });
         res.status(500).json({ error: 'Failed to upsert reviews_sync jobs', details: insertReviewsError.message });
         return;
       }
 
       reviewsSyncInserted = reviewsPayload.length;
     }
+
+    await logEvent({
+      level: 'info',
+      marketplace: 'ifood',
+      source: 'dex-contabo/api',
+      service: 'ifood-schedule-jobs',
+      event: 'ifood.schedule.success',
+      message: 'iFood jobs scheduled',
+      trace_id: traceId,
+      competence,
+      data: {
+        total_accounts: baseAccounts.length,
+        inserted_conciliation: conciliationInserted,
+        inserted_sales_sync: salesSyncInserted,
+        inserted_anticipations_daily: anticipationsDailyInserted,
+        inserted_reconciliation_status: reconciliationStatusInserted,
+        inserted_settlements_weekly: settlementsWeeklyInserted,
+        inserted_reviews_sync: reviewsSyncInserted,
+        window_start: windowStart,
+        window_end: windowEnd,
+        timezone: tz,
+        is_monday_local: isMondayLocal,
+      },
+    });
 
     res.status(200).json({
       message: 'iFood jobs scheduled',
@@ -412,8 +536,15 @@ export default async function handler(req: any, res: any) {
       is_monday_local: isMondayLocal,
     });
   } catch (err: any) {
-    // eslint-disable-next-line no-console
-    console.error('[ifood-schedule-jobs] Unexpected error:', err?.message || err);
+    await logError({
+      marketplace: 'ifood',
+      source: 'dex-contabo/api',
+      service: 'ifood-schedule-jobs',
+      event: 'ifood.schedule.unexpected_error',
+      message: 'Unexpected error',
+      trace_id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      err,
+    });
     res.status(500).json({ error: 'Unexpected error', message: err?.message || String(err) });
   }
 }

@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { ifoodRateLimiter } from './utils/rate-limiter';
+import { logError, logEvent } from '../services/app-logger';
 
 // Carregar .env do projeto (quando compilado, __dirname será dist/workers)
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
@@ -11,16 +12,31 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const DEX_API_BASE_URL = (process.env.DEX_API_BASE_URL || 'http://localhost:3000').trim();
 
-console.log('[ifood-settlements-worker] ENV DEBUG', {
-  cwd: process.cwd(),
-  dirname: __dirname,
-  hasSupabaseUrl: !!SUPABASE_URL,
-  hasServiceRole: !!SUPABASE_SERVICE_ROLE_KEY,
-  supabaseUrlPreview: SUPABASE_URL ? SUPABASE_URL.slice(0, 30) : null,
+void logEvent({
+  level: 'debug',
+  marketplace: 'ifood',
+  source: 'dex-contabo/worker',
+  service: 'ifood-settlements-worker',
+  event: 'worker.env',
+  message: 'Env check',
+  trace_id: 'boot',
+  data: {
+    cwd: process.cwd(),
+    dirname: __dirname,
+    hasSupabaseUrl: !!SUPABASE_URL,
+    hasServiceRole: !!SUPABASE_SERVICE_ROLE_KEY,
+    supabaseUrlPreview: SUPABASE_URL ? SUPABASE_URL.slice(0, 30) : null,
+  },
 });
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('[ifood-settlements-worker] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados. Worker não conseguirá processar jobs.');
+  void logError({
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-settlements-worker',
+    event: 'worker.env.missing',
+    message: 'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados. Worker não conseguirá processar jobs.',
+  });
 }
 
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -47,6 +63,23 @@ interface IfoodJob {
   status: string;
   attempts: number | null;
   next_retry_at: string | null;
+  run_id?: string | null;
+  trace_id?: string | null;
+}
+
+function jobLogContext(job?: Partial<IfoodJob> | null) {
+  return {
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-settlements-worker',
+    trace_id: (job?.trace_id || null) as any,
+    run_id: (job?.run_id || null) as any,
+    job_id: (job?.id || null) as any,
+    account_id: (job?.account_id || null) as any,
+    merchant_id: (job?.merchant_id || null) as any,
+    job_type: 'settlements_weekly',
+    competence: (job?.competence || null) as any,
+  };
 }
 
 function computePreviousWeekRangeFromJobDay(jobDay: string): { beginPaymentDate: string; endPaymentDate: string } {
@@ -94,7 +127,12 @@ async function reserveJobs(limit: number): Promise<IfoodJob[]> {
     .limit(limit * 2);
 
   if (error) {
-    console.error('[ifood-settlements-worker] Erro ao buscar jobs pendentes:', error.message);
+    await logError({
+      ...jobLogContext(null),
+      event: 'ifood.jobs.reserve.error',
+      message: 'Erro ao buscar jobs pendentes',
+      err: error,
+    });
     return [];
   }
 
@@ -121,7 +159,12 @@ async function reserveJobs(limit: number): Promise<IfoodJob[]> {
         reserved.push(updated as IfoodJob);
       }
     } catch (err: any) {
-      console.error('[ifood-settlements-worker] Erro ao reservar job:', err?.message || err);
+      await logError({
+        ...jobLogContext(job as any),
+        event: 'ifood.jobs.reserve.exception',
+        message: 'Exceção ao reservar job',
+        err,
+      });
     }
   }
 
@@ -147,7 +190,12 @@ async function markJobSuccess(job: IfoodJob) {
     .eq('id', job.id);
 
   if (error) {
-    console.error('[ifood-settlements-worker] Erro ao marcar job como success:', error.message);
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.jobs.mark_success.error',
+      message: 'Erro ao marcar job como success',
+      err: error,
+    });
   }
 }
 
@@ -181,13 +229,25 @@ async function markJobRetry(job: IfoodJob, errorMessage: string) {
     .eq('id', job.id);
 
   if (error) {
-    console.error('[ifood-settlements-worker] Erro ao marcar job como retry/failed:', error.message);
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.jobs.mark_retry.error',
+      message: 'Erro ao marcar job como retry/failed',
+      err: error,
+      data: { desired_status: status, next_retry_at },
+    });
   }
 }
 
 async function processSettlementsWeeklyJob(job: IfoodJob) {
   if (!job.account_id || !job.merchant_id) {
     await markJobRetry(job, 'Dados incompletos no job (account_id/merchant_id ausentes).');
+    await logEvent({
+      level: 'warn',
+      ...jobLogContext(job),
+      event: 'ifood.job.invalid',
+      message: 'Dados incompletos no job (account_id/merchant_id ausentes)',
+    });
     return;
   }
 
@@ -198,6 +258,13 @@ async function processSettlementsWeeklyJob(job: IfoodJob) {
     range = computePreviousWeekRangeFromJobDay(jobDay);
   } catch (err: any) {
     await markJobRetry(job, `Erro ao calcular semana anterior: ${err?.message || String(err)}`);
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.settlements.week_range.error',
+      message: 'Erro ao calcular semana anterior',
+      err,
+      data: { job_day: jobDay },
+    });
     return;
   }
 
@@ -212,13 +279,12 @@ async function processSettlementsWeeklyJob(job: IfoodJob) {
   };
 
   try {
-    console.log('[ifood-settlements-worker] Disparando ingest de settlements semanais', {
-      jobId: job.id,
-      accountId: job.account_id,
-      merchantId: job.merchant_id,
-      beginPaymentDate: range.beginPaymentDate,
-      endPaymentDate: range.endPaymentDate,
-      url,
+    await logEvent({
+      level: 'info',
+      ...jobLogContext(job),
+      event: 'ifood.settlements.ingest.request',
+      message: 'Disparando ingest de settlements semanais',
+      data: { url, beginPaymentDate: range.beginPaymentDate, endPaymentDate: range.endPaymentDate },
     });
 
     const response = await ifoodRateLimiter.execute(() =>
@@ -237,27 +303,40 @@ async function processSettlementsWeeklyJob(job: IfoodJob) {
       try {
         parsed = JSON.parse(text);
       } catch (err: any) {
-        console.warn('[ifood-settlements-worker] Falha ao parsear resposta JSON do endpoint de settlements:', err?.message || err);
+        await logError({
+          ...jobLogContext(job),
+          event: 'ifood.settlements.ingest.response_parse.error',
+          message: 'Falha ao parsear resposta JSON do endpoint de settlements',
+          err,
+        });
       }
     }
 
     if (response.ok && parsed && parsed.success) {
-      console.log('[ifood-settlements-worker] Job de settlements concluído com sucesso', {
-        jobId: job.id,
-        processedItems: parsed.processedItems,
-        dbSavedItems: parsed.dbSavedItems,
-      });
       await markJobSuccess(job);
+      await logEvent({
+        level: 'info',
+        ...jobLogContext(job),
+        event: 'ifood.settlements.ingest.success',
+        message: 'Job de settlements concluído com sucesso',
+        data: {
+          processedItems: parsed?.processedItems ?? null,
+          dbSavedItems: parsed?.dbSavedItems ?? null,
+          http_status: response.status,
+        },
+      });
       return;
     }
 
     const errorMessage = `HTTP ${response.status}: ${text.slice(0, 500)}`;
 
     if (response.status >= 400 && response.status < 500) {
-      console.error('[ifood-settlements-worker] Erro não-retryable no ingest de settlements:', {
-        jobId: job.id,
-        status: response.status,
-        body: text.slice(0, 500),
+      await logEvent({
+        level: 'warn',
+        ...jobLogContext(job),
+        event: 'ifood.settlements.ingest.http_error',
+        message: 'Erro não-retryable no ingest de settlements (4xx)',
+        data: { http_status: response.status, response_preview: text.slice(0, 200) },
       });
       job.attempts = (job.attempts || 0) + 1;
       job.next_retry_at = null;
@@ -265,16 +344,21 @@ async function processSettlementsWeeklyJob(job: IfoodJob) {
       return;
     }
 
-    console.warn('[ifood-settlements-worker] Erro retryable no ingest de settlements:', {
-      jobId: job.id,
-      status: response.status,
+    await logEvent({
+      level: 'warn',
+      ...jobLogContext(job),
+      event: 'ifood.settlements.ingest.http_error',
+      message: 'Erro retryable no ingest de settlements (5xx)',
+      data: { http_status: response.status },
     });
     await markJobRetry(job, errorMessage);
   } catch (err: any) {
     const message = err?.message || String(err);
-    console.error('[ifood-settlements-worker] Exceção ao processar job de settlements:', {
-      jobId: job.id,
-      error: message,
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.settlements.ingest.exception',
+      message: 'Exceção ao processar job de settlements',
+      err,
     });
     await markJobRetry(job, message);
   }
@@ -282,7 +366,15 @@ async function processSettlementsWeeklyJob(job: IfoodJob) {
 
 async function tick() {
   if (!supabase) {
-    console.error('[ifood-settlements-worker] Supabase não inicializado. Aguardando configuração...');
+    await logEvent({
+      level: 'warn',
+      marketplace: 'ifood',
+      source: 'dex-contabo/worker',
+      service: 'ifood-settlements-worker',
+      event: 'worker.supabase.missing',
+      message: 'Supabase não inicializado. Aguardando configuração...',
+      trace_id: WORKER_ID,
+    });
     await sleep(30_000);
     return;
   }
@@ -293,20 +385,30 @@ async function tick() {
     return;
   }
 
-  console.log('[ifood-settlements-worker] Processando lote de jobs', {
-    count: jobs.length,
-    workerId: WORKER_ID,
+  await logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-settlements-worker',
+    event: 'worker.batch.start',
+    message: 'Processando lote de jobs',
+    trace_id: WORKER_ID,
+    data: { count: jobs.length },
   });
 
   await Promise.all(jobs.map((job) => processSettlementsWeeklyJob(job)));
 }
 
 async function main() {
-  console.log('[ifood-settlements-worker] Iniciado', {
-    workerId: WORKER_ID,
-    maxConcurrency: MAX_CONCURRENCY,
-    pollIntervalMs: POLL_INTERVAL_MS,
-    apiBase: DEX_API_BASE_URL,
+  await logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-settlements-worker',
+    event: 'worker.start',
+    message: 'Worker iniciado',
+    trace_id: WORKER_ID,
+    data: { maxConcurrency: MAX_CONCURRENCY, pollIntervalMs: POLL_INTERVAL_MS, apiBase: DEX_API_BASE_URL },
   });
 
   // Loop principal
@@ -315,7 +417,15 @@ async function main() {
     try {
       await tick();
     } catch (err: any) {
-      console.error('[ifood-settlements-worker] Erro inesperado no loop principal:', err?.message || err);
+      await logError({
+        marketplace: 'ifood',
+        source: 'dex-contabo/worker',
+        service: 'ifood-settlements-worker',
+        event: 'worker.loop.error',
+        message: 'Erro inesperado no loop principal',
+        trace_id: WORKER_ID,
+        err,
+      });
     }
 
     await sleep(POLL_INTERVAL_MS);
@@ -323,16 +433,35 @@ async function main() {
 }
 
 main().catch((err) => {
+  // eslint-disable-next-line no-console
   console.error('[ifood-settlements-worker] Falha ao iniciar worker:', err?.message || err);
   process.exit(1);
 });
 
 process.on('SIGTERM', () => {
-  console.log('[ifood-settlements-worker] Recebido SIGTERM, encerrando...');
+  void logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-settlements-worker',
+    event: 'worker.signal',
+    message: 'Recebido SIGTERM, encerrando...',
+    trace_id: WORKER_ID,
+    data: { signal: 'SIGTERM' },
+  });
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('[ifood-settlements-worker] Recebido SIGINT, encerrando...');
+  void logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-settlements-worker',
+    event: 'worker.signal',
+    message: 'Recebido SIGINT, encerrando...',
+    trace_id: WORKER_ID,
+    data: { signal: 'SIGINT' },
+  });
   process.exit(0);
 });

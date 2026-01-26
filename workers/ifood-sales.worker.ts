@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { ifoodRateLimiter } from './utils/rate-limiter';
+import { logError, logEvent } from '../services/app-logger';
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
@@ -10,16 +11,31 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const DEX_API_BASE_URL = (process.env.DEX_API_BASE_URL || 'http://localhost:3000').trim();
 
-console.log('[ifood-sales-worker] ENV DEBUG', {
-  cwd: process.cwd(),
-  dirname: __dirname,
-  hasSupabaseUrl: !!SUPABASE_URL,
-  hasServiceRole: !!SUPABASE_SERVICE_ROLE_KEY,
-  supabaseUrlPreview: SUPABASE_URL ? SUPABASE_URL.slice(0, 30) : null,
+void logEvent({
+  level: 'debug',
+  marketplace: 'ifood',
+  source: 'dex-contabo/worker',
+  service: 'ifood-sales-worker',
+  event: 'worker.env',
+  message: 'Env check',
+  trace_id: 'boot',
+  data: {
+    cwd: process.cwd(),
+    dirname: __dirname,
+    hasSupabaseUrl: !!SUPABASE_URL,
+    hasServiceRole: !!SUPABASE_SERVICE_ROLE_KEY,
+    supabaseUrlPreview: SUPABASE_URL ? SUPABASE_URL.slice(0, 30) : null,
+  },
 });
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('[ifood-sales-worker] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados. Worker não conseguirá processar jobs.');
+  void logError({
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-sales-worker',
+    event: 'worker.env.missing',
+    message: 'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados. Worker não conseguirá processar jobs.',
+  });
 }
 
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -45,6 +61,23 @@ interface IfoodJob {
   status: string;
   attempts: number | null;
   next_retry_at: string | null;
+  run_id?: string | null;
+  trace_id?: string | null;
+}
+
+function jobLogContext(job?: Partial<IfoodJob> | null) {
+  return {
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-sales-worker',
+    trace_id: (job?.trace_id || null) as any,
+    run_id: (job?.run_id || null) as any,
+    job_id: (job?.id || null) as any,
+    account_id: (job?.account_id || null) as any,
+    merchant_id: (job?.merchant_id || null) as any,
+    job_type: 'sales_sync',
+    competence: (job?.competence || null) as any,
+  };
 }
 
 interface SalesSyncRange {
@@ -81,7 +114,12 @@ async function computeSalesSyncRange(accountId: string, merchantId: string): Pro
     .maybeSingle();
 
   if (error) {
-    console.error('[ifood-sales-worker] Erro ao buscar último sync de vendas:', error.message);
+    await logError({
+      ...jobLogContext({ account_id: accountId, merchant_id: merchantId }),
+      event: 'ifood.sales_sync_status.fetch_last_completed.error',
+      message: 'Erro ao buscar último sync de vendas',
+      err: error,
+    });
   }
 
   const lastEnd = (lastCompleted as any)?.period_end as string | null;
@@ -115,7 +153,12 @@ async function reserveJobs(limit: number): Promise<IfoodJob[]> {
     .limit(limit * 2);
 
   if (error) {
-    console.error('[ifood-sales-worker] Erro ao buscar jobs pendentes:', error.message);
+    await logError({
+      ...jobLogContext(null),
+      event: 'ifood.jobs.reserve.error',
+      message: 'Erro ao buscar jobs pendentes',
+      err: error,
+    });
     return [];
   }
 
@@ -142,7 +185,12 @@ async function reserveJobs(limit: number): Promise<IfoodJob[]> {
         reserved.push(updated as IfoodJob);
       }
     } catch (err: any) {
-      console.error('[ifood-sales-worker] Erro ao reservar job:', err?.message || err);
+      await logError({
+        ...jobLogContext(job as any),
+        event: 'ifood.jobs.reserve.exception',
+        message: 'Exceção ao reservar job',
+        err,
+      });
     }
   }
 
@@ -168,7 +216,12 @@ async function markJobSuccess(job: IfoodJob) {
     .eq('id', job.id);
 
   if (error) {
-    console.error('[ifood-sales-worker] Erro ao marcar job como success:', error.message);
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.jobs.mark_success.error',
+      message: 'Erro ao marcar job como success',
+      err: error,
+    });
   }
 }
 
@@ -202,23 +255,36 @@ async function markJobRetry(job: IfoodJob, errorMessage: string) {
     .eq('id', job.id);
 
   if (error) {
-    console.error('[ifood-sales-worker] Erro ao marcar job como retry/failed:', error.message);
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.jobs.mark_retry.error',
+      message: 'Erro ao marcar job como retry/failed',
+      err: error,
+      data: { desired_status: status, next_retry_at },
+    });
   }
 }
 
 async function processSalesSyncJob(job: IfoodJob) {
   if (!job.account_id || !job.merchant_id) {
     await markJobRetry(job, 'Dados incompletos no job (account_id/merchant_id ausentes).');
+    await logEvent({
+      level: 'warn',
+      ...jobLogContext(job),
+      event: 'ifood.job.invalid',
+      message: 'Dados incompletos no job (account_id/merchant_id ausentes)',
+    });
     return;
   }
 
   const range = await computeSalesSyncRange(job.account_id, job.merchant_id);
 
   if (!range) {
-    console.log('[ifood-sales-worker] Nenhum período pendente para sync de vendas', {
-      jobId: job.id,
-      accountId: job.account_id,
-      merchantId: job.merchant_id,
+    await logEvent({
+      level: 'info',
+      ...jobLogContext(job),
+      event: 'ifood.sales.sync.noop',
+      message: 'Nenhum período pendente para sync de vendas',
     });
     await markJobSuccess(job);
     return;
@@ -250,7 +316,13 @@ async function processSalesSyncJob(job: IfoodJob) {
     );
 
   if (upsertError) {
-    console.error('[ifood-sales-worker] Erro ao upsert ifood_sales_sync_status:', upsertError.message);
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.sales_sync_status.upsert.error',
+      message: 'Erro ao upsert ifood_sales_sync_status',
+      err: upsertError,
+      data: { period_start: range.startDate, period_end: range.endDate },
+    });
     await markJobRetry(job, `Erro ao registrar status de sync de vendas: ${upsertError.message}`);
     return;
   }
@@ -265,13 +337,12 @@ async function processSalesSyncJob(job: IfoodJob) {
   const url = `${DEX_API_BASE_URL}/api/ifood/sales/sync`;
 
   try {
-    console.log('[ifood-sales-worker] Disparando sync de vendas para job', {
-      jobId: job.id,
-      accountId: job.account_id,
-      merchantId: job.merchant_id,
-      periodStart: range.startDate,
-      periodEnd: range.endDate,
-      url,
+    await logEvent({
+      level: 'info',
+      ...jobLogContext(job),
+      event: 'ifood.sales.sync.request',
+      message: 'Disparando sync de vendas',
+      data: { url, period_start: range.startDate, period_end: range.endDate },
     });
 
     const response = await ifoodRateLimiter.execute(() =>
@@ -290,7 +361,12 @@ async function processSalesSyncJob(job: IfoodJob) {
       try {
         parsed = JSON.parse(responseText);
       } catch (parseErr: any) {
-        console.error('[ifood-sales-worker] Erro ao fazer parse da resposta do sync de vendas:', parseErr?.message || parseErr);
+        await logError({
+          ...jobLogContext(job),
+          event: 'ifood.sales.sync.response_parse.error',
+          message: 'Erro ao fazer parse da resposta do sync de vendas',
+          err: parseErr,
+        });
       }
     }
 
@@ -313,10 +389,22 @@ async function processSalesSyncJob(job: IfoodJob) {
         .eq('period_end', range.endDate);
 
       if (updateError) {
-        console.error('[ifood-sales-worker] Erro ao atualizar ifood_sales_sync_status após sucesso:', updateError.message);
+        await logError({
+          ...jobLogContext(job),
+          event: 'ifood.sales_sync_status.update_after_success.error',
+          message: 'Erro ao atualizar ifood_sales_sync_status após sucesso',
+          err: updateError,
+        });
       }
 
       await markJobSuccess(job);
+      await logEvent({
+        level: 'info',
+        ...jobLogContext(job),
+        event: 'ifood.sales.sync.success',
+        message: 'Sync de vendas concluído',
+        data: { salesSynced, totalPages },
+      });
       return;
     }
 
@@ -335,14 +423,21 @@ async function processSalesSyncJob(job: IfoodJob) {
       .eq('period_end', range.endDate);
 
     if (statusError) {
-      console.error('[ifood-sales-worker] Erro ao atualizar ifood_sales_sync_status após falha:', statusError.message);
+      await logError({
+        ...jobLogContext(job),
+        event: 'ifood.sales_sync_status.update_after_failure.error',
+        message: 'Erro ao atualizar ifood_sales_sync_status após falha',
+        err: statusError,
+      });
     }
 
     if (response.status >= 400 && response.status < 500) {
-      console.error('[ifood-sales-worker] Erro não-retryable no sync de vendas:', {
-        jobId: job.id,
-        status: response.status,
-        body: responseText.slice(0, 500),
+      await logEvent({
+        level: 'warn',
+        ...jobLogContext(job),
+        event: 'ifood.sales.sync.http_error',
+        message: 'Erro não-retryable no sync de vendas (4xx)',
+        data: { http_status: response.status, response_preview: responseText.slice(0, 200) },
       });
       job.attempts = (job.attempts || 0) + 1;
       job.next_retry_at = null;
@@ -350,9 +445,12 @@ async function processSalesSyncJob(job: IfoodJob) {
       return;
     }
 
-    console.warn('[ifood-sales-worker] Erro retryable no sync de vendas:', {
-      jobId: job.id,
-      status: response.status,
+    await logEvent({
+      level: 'warn',
+      ...jobLogContext(job),
+      event: 'ifood.sales.sync.http_error',
+      message: 'Erro retryable no sync de vendas (5xx)',
+      data: { http_status: response.status },
     });
     await markJobRetry(job, errorMessage);
   } catch (err: any) {
@@ -371,12 +469,19 @@ async function processSalesSyncJob(job: IfoodJob) {
       .eq('period_end', range.endDate);
 
     if (statusError) {
-      console.error('[ifood-sales-worker] Erro ao atualizar ifood_sales_sync_status após exceção:', statusError.message);
+      await logError({
+        ...jobLogContext(job),
+        event: 'ifood.sales_sync_status.update_after_exception.error',
+        message: 'Erro ao atualizar ifood_sales_sync_status após exceção',
+        err: statusError,
+      });
     }
 
-    console.error('[ifood-sales-worker] Exceção ao processar job de vendas:', {
-      jobId: job.id,
-      error: message,
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.sales.sync.exception',
+      message: 'Exceção ao processar job de vendas',
+      err,
     });
     await markJobRetry(job, message);
   }
@@ -384,7 +489,15 @@ async function processSalesSyncJob(job: IfoodJob) {
 
 async function tick() {
   if (!supabase) {
-    console.error('[ifood-sales-worker] Supabase não inicializado. Aguardando configuração...');
+    await logEvent({
+      level: 'warn',
+      marketplace: 'ifood',
+      source: 'dex-contabo/worker',
+      service: 'ifood-sales-worker',
+      event: 'worker.supabase.missing',
+      message: 'Supabase não inicializado. Aguardando configuração...',
+      trace_id: WORKER_ID,
+    });
     await sleep(30_000);
     return;
   }
@@ -395,27 +508,45 @@ async function tick() {
     return;
   }
 
-  console.log('[ifood-sales-worker] Processando lote de jobs', {
-    count: jobs.length,
-    workerId: WORKER_ID,
+  await logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-sales-worker',
+    event: 'worker.batch.start',
+    message: 'Processando lote de jobs',
+    trace_id: WORKER_ID,
+    data: { count: jobs.length },
   });
 
   await Promise.all(jobs.map((job) => processSalesSyncJob(job)));
 }
 
 async function main() {
-  console.log('[ifood-sales-worker] Iniciado', {
-    workerId: WORKER_ID,
-    maxConcurrency: MAX_CONCURRENCY,
-    pollIntervalMs: POLL_INTERVAL_MS,
-    apiBase: DEX_API_BASE_URL,
+  await logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-sales-worker',
+    event: 'worker.start',
+    message: 'Worker iniciado',
+    trace_id: WORKER_ID,
+    data: { maxConcurrency: MAX_CONCURRENCY, pollIntervalMs: POLL_INTERVAL_MS, apiBase: DEX_API_BASE_URL },
   });
 
   while (true) {
     try {
       await tick();
     } catch (err: any) {
-      console.error('[ifood-sales-worker] Erro inesperado no loop principal:', err?.message || err);
+      await logError({
+        marketplace: 'ifood',
+        source: 'dex-contabo/worker',
+        service: 'ifood-sales-worker',
+        event: 'worker.loop.error',
+        message: 'Erro inesperado no loop principal',
+        trace_id: WORKER_ID,
+        err,
+      });
     }
 
     await sleep(POLL_INTERVAL_MS);
@@ -423,16 +554,35 @@ async function main() {
 }
 
 main().catch((err) => {
+  // eslint-disable-next-line no-console
   console.error('[ifood-sales-worker] Falha ao iniciar worker:', err?.message || err);
   process.exit(1);
 });
 
 process.on('SIGTERM', () => {
-  console.log('[ifood-sales-worker] Recebido SIGTERM, encerrando...');
+  void logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-sales-worker',
+    event: 'worker.signal',
+    message: 'Recebido SIGTERM, encerrando...',
+    trace_id: WORKER_ID,
+    data: { signal: 'SIGTERM' },
+  });
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('[ifood-sales-worker] Recebido SIGINT, encerrando...');
+  void logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-sales-worker',
+    event: 'worker.signal',
+    message: 'Recebido SIGINT, encerrando...',
+    trace_id: WORKER_ID,
+    data: { signal: 'SIGINT' },
+  });
   process.exit(0);
 });

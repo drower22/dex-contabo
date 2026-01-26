@@ -7,6 +7,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { IfoodReconciliationCalculator } from '../services/ifood-reconciliation-calculator';
+import { logError, logEvent } from '../services/app-logger';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -18,11 +19,27 @@ interface ReconciliationJob {
   account_id: string;
   merchant_id: string;
   job_type: string;
-  competence: string;
+  competence: string | null;
   status: string;
-  reserved_at: string | null;
   attempts: number;
-  created_at: string;
+  next_retry_at?: string | null;
+  trace_id?: string | null;
+  run_id?: string | null;
+}
+
+function jobLogContext(job?: Partial<ReconciliationJob> | null) {
+  return {
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-reconciliation-status-worker',
+    trace_id: (job?.trace_id || null) as any,
+    run_id: (job?.run_id || null) as any,
+    job_id: (job?.id || null) as any,
+    account_id: (job?.account_id || null) as any,
+    merchant_id: (job?.merchant_id || null) as any,
+    job_type: 'reconciliation_status',
+    competence: (job?.competence || null) as any,
+  };
 }
 
 class IfoodReconciliationStatusWorker {
@@ -40,7 +57,12 @@ class IfoodReconciliationStatusWorker {
    * Inicia o worker
    */
   async start(): Promise<void> {
-    console.log('[reconciliation-status-worker] Iniciando worker de status de conciliação...');
+    await logEvent({
+      level: 'info',
+      ...jobLogContext(null),
+      event: 'worker.start',
+      message: 'Iniciando worker de status de conciliação',
+    });
     this.isRunning = true;
 
     while (this.isRunning) {
@@ -48,7 +70,12 @@ class IfoodReconciliationStatusWorker {
         await this.processNextJob();
         await this.sleep(this.POLL_INTERVAL_MS);
       } catch (error) {
-        console.error('[reconciliation-status-worker] Erro no loop principal:', error);
+        await logError({
+          ...jobLogContext(null),
+          event: 'worker.loop.error',
+          message: 'Erro no loop principal',
+          err: error,
+        });
         await this.sleep(this.POLL_INTERVAL_MS);
       }
     }
@@ -58,7 +85,12 @@ class IfoodReconciliationStatusWorker {
    * Para o worker
    */
   stop(): void {
-    console.log('[reconciliation-status-worker] Parando worker...');
+    void logEvent({
+      level: 'info',
+      ...jobLogContext(null),
+      event: 'worker.stop',
+      message: 'Parando worker',
+    });
     this.isRunning = false;
   }
 
@@ -71,7 +103,12 @@ class IfoodReconciliationStatusWorker {
       return; // Nenhum job disponível
     }
 
-    console.log(`[reconciliation-status-worker] Processando job ${job.id} para account ${job.account_id}`);
+    await logEvent({
+      level: 'info',
+      ...jobLogContext(job),
+      event: 'ifood.reconciliation_status.process.start',
+      message: 'Processando job de reconciliation_status',
+    });
 
     try {
       // Marcar job como running
@@ -83,24 +120,46 @@ class IfoodReconciliationStatusWorker {
       // Marcar job como success
       await this.updateJobStatus(job.id, 'success');
 
-      console.log(`[reconciliation-status-worker] Job ${job.id} concluído com sucesso`);
+      await logEvent({
+        level: 'info',
+        ...jobLogContext(job),
+        event: 'ifood.reconciliation_status.process.success',
+        message: 'Job concluído com sucesso',
+      });
 
     } catch (error) {
-      console.error(`[reconciliation-status-worker] Erro ao processar job ${job.id}:`, error);
+      await logError({
+        ...jobLogContext(job),
+        event: 'ifood.reconciliation_status.process.error',
+        message: 'Erro ao processar job',
+        err: error,
+      });
 
       // Incrementar tentativas e decidir se retry ou fail
       const newAttempts = job.attempts + 1;
       
       if (newAttempts >= this.MAX_ATTEMPTS) {
         await this.updateJobStatus(job.id, 'failed', error instanceof Error ? error.message : String(error));
-        console.log(`[reconciliation-status-worker] Job ${job.id} falhou após ${this.MAX_ATTEMPTS} tentativas`);
+        await logEvent({
+          level: 'warn',
+          ...jobLogContext(job),
+          event: 'ifood.reconciliation_status.process.failed',
+          message: 'Job falhou após max tentativas',
+          data: { attempts: newAttempts },
+        });
       } else {
         // Liberar job para retry com backoff exponencial
         const backoffMs = Math.pow(2, newAttempts) * 60000; // 2^n minutos em ms
         const nextAttemptAt = new Date(Date.now() + backoffMs);
         
         await this.releaseJobForRetry(job.id, newAttempts, nextAttemptAt);
-        console.log(`[reconciliation-status-worker] Job ${job.id} liberado para retry em ${nextAttemptAt.toISOString()}`);
+        await logEvent({
+          level: 'info',
+          ...jobLogContext(job),
+          event: 'ifood.reconciliation_status.process.retry_scheduled',
+          message: 'Job liberado para retry',
+          data: { attempts: newAttempts, next_retry_at: nextAttemptAt.toISOString() },
+        });
       }
     }
   }
@@ -109,21 +168,24 @@ class IfoodReconciliationStatusWorker {
    * Reserva o próximo job disponível
    */
   private async reserveNextJob(): Promise<ReconciliationJob | null> {
-    const reserveUntil = new Date(Date.now() + this.RESERVE_TIMEOUT_MINUTES * 60000);
-
     // Buscar jobs pendentes ou que falharam e já podem ser tentados novamente
     const { data, error } = await supabase
       .from('ifood_jobs')
       .select('*')
       .eq('job_type', 'reconciliation_status')
-      .in('status', ['pending', 'failed'])
-      .or(`reserved_at.is.null,reserved_at.lt.${new Date().toISOString()}`)
+      .eq('status', 'pending')
+      .or(`next_retry_at.is.null,next_retry_at.lt.${new Date().toISOString()}`)
       .lt('attempts', this.MAX_ATTEMPTS)
-      .order('created_at', { ascending: true })
+      .order('scheduled_for', { ascending: true })
       .limit(1);
 
     if (error) {
-      console.error('[reconciliation-status-worker] Erro ao buscar jobs:', error);
+      await logError({
+        ...jobLogContext(null),
+        event: 'ifood.jobs.reserve.error',
+        message: 'Erro ao buscar jobs',
+        err: error,
+      });
       return null;
     }
 
@@ -137,14 +199,21 @@ class IfoodReconciliationStatusWorker {
     const { error: updateError } = await supabase
       .from('ifood_jobs')
       .update({
-        reserved_at: reserveUntil.toISOString(),
-        status: 'reserved'
+        status: 'running',
+        locked_by: 'ifood-reconciliation-status-worker',
+        locked_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       })
       .eq('id', job.id)
       .eq('status', job.status); // Condição para evitar race condition
 
     if (updateError) {
-      console.error('[reconciliation-status-worker] Erro ao reservar job:', updateError);
+      await logError({
+        ...jobLogContext(job),
+        event: 'ifood.jobs.reserve.error',
+        message: 'Erro ao reservar job',
+        err: updateError,
+      });
       return null;
     }
 
@@ -157,7 +226,8 @@ class IfoodReconciliationStatusWorker {
   private async updateJobStatus(jobId: string, status: string, errorMessage?: string): Promise<void> {
     const updateData: any = {
       status,
-      reserved_at: null,
+      locked_at: null,
+      locked_by: null,
       updated_at: new Date().toISOString()
     };
 
@@ -175,7 +245,12 @@ class IfoodReconciliationStatusWorker {
       .eq('id', jobId);
 
     if (error) {
-      console.error(`[reconciliation-status-worker] Erro ao atualizar status do job ${jobId}:`, error);
+      await logError({
+        ...jobLogContext({ id: jobId } as any),
+        event: 'ifood.jobs.update_status.error',
+        message: 'Erro ao atualizar status do job',
+        err: error,
+      });
     }
   }
 
@@ -187,15 +262,21 @@ class IfoodReconciliationStatusWorker {
       .from('ifood_jobs')
       .update({
         status: 'pending',
-        reserved_at: null,
+        locked_at: null,
+        locked_by: null,
         attempts,
-        next_attempt_at: nextAttemptAt.toISOString(),
+        next_retry_at: nextAttemptAt.toISOString(),
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
 
     if (error) {
-      console.error(`[reconciliation-status-worker] Erro ao liberar job ${jobId} para retry:`, error);
+      await logError({
+        ...jobLogContext({ id: jobId } as any),
+        event: 'ifood.jobs.release_retry.error',
+        message: 'Erro ao liberar job para retry',
+        err: error,
+      });
     }
   }
 
@@ -213,19 +294,21 @@ if (require.main === module) {
   
   // Graceful shutdown
   process.on('SIGINT', () => {
-    console.log('[reconciliation-status-worker] Recebido SIGINT, parando worker...');
+    void logEvent({ level: 'info', ...jobLogContext(null), event: 'worker.signal', message: 'Recebido SIGINT, parando worker', data: { signal: 'SIGINT' } });
     worker.stop();
     process.exit(0);
   });
 
   process.on('SIGTERM', () => {
-    console.log('[reconciliation-status-worker] Recebido SIGTERM, parando worker...');
+    void logEvent({ level: 'info', ...jobLogContext(null), event: 'worker.signal', message: 'Recebido SIGTERM, parando worker', data: { signal: 'SIGTERM' } });
     worker.stop();
     process.exit(0);
   });
 
   // Iniciar worker
   worker.start().catch(error => {
+    void logError({ ...jobLogContext(null), event: 'worker.fatal', message: 'Erro fatal', err: error });
+    // eslint-disable-next-line no-console
     console.error('[reconciliation-status-worker] Erro fatal:', error);
     process.exit(1);
   });

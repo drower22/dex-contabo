@@ -28,21 +28,36 @@ export default async function handler(req: any, res: any) {
     const level = asString(req.query?.level).trim();
     const search = asString(req.query?.search).trim();
     const accountId = asString(req.query?.account_id).trim();
-    const feature = asString(req.query?.feature).trim();
+    const marketplace = asString(req.query?.marketplace).trim();
+    const service = asString(req.query?.service).trim();
+    const event = asString(req.query?.event).trim();
+    const source = asString(req.query?.source).trim();
+    const jobId = asString(req.query?.job_id).trim();
+    const runId = asString(req.query?.run_id).trim();
+    const traceId = asString(req.query?.trace_id).trim();
     const from = asString(req.query?.from).trim();
     const to = asString(req.query?.to).trim();
 
     const supabase = createServiceSupabaseClient();
 
     let q = supabase
-      .from('logs')
-      .select('id, created_at, level, message, account_id, context', { count: 'exact' })
+      .from('app_logs')
+      .select(
+        'id, created_at, level, event, message, marketplace, source, service, environment, agency_id, account_id, user_id, trace_id, run_id, job_id, request_id, merchant_id, competence, job_type, http_method, http_path, http_status, duration_ms, data',
+        { count: 'exact' },
+      )
       .order('created_at', { ascending: false });
 
     if (level) q = q.eq('level', level);
     if (accountId) q = q.eq('account_id', accountId);
     if (search) q = q.ilike('message', `%${search}%`);
-    if (feature) q = q.filter('context->>feature', 'eq', feature);
+    if (marketplace) q = q.eq('marketplace', marketplace);
+    if (service) q = q.eq('service', service);
+    if (event) q = q.eq('event', event);
+    if (source) q = q.eq('source', source);
+    if (jobId) q = q.eq('job_id', jobId);
+    if (runId) q = q.eq('run_id', runId);
+    if (traceId) q = q.eq('trace_id', traceId);
 
     if (from) q = q.gte('created_at', from);
     if (to) q = q.lte('created_at', to);

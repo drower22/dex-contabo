@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
+import { logError, logEvent } from '../services/app-logger';
 
 // Garantir carregamento do .env mesmo quando o PM2 não injeta env_file
 dotenv.config({ path: path.join(process.cwd(), '.env') });
@@ -20,12 +21,15 @@ type IfoodJob = {
   job_type: string;
   account_id: string | null;
   merchant_id: string | null;
+  competence?: string | null;
   job_day: string | null;
   status: string;
   scheduled_for: string | null;
   attempts: number | null;
   next_retry_at: string | null;
   last_error: string | null;
+  run_id?: string | null;
+  trace_id?: string | null;
 };
 
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -33,7 +37,23 @@ const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
   : null;
 
 if (!supabase) {
+  // eslint-disable-next-line no-console
   console.error('[ifood-reviews-worker] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados.');
+}
+
+function jobLogContext(job?: Partial<IfoodJob> | null) {
+  return {
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-reviews-worker',
+    trace_id: (job?.trace_id || null) as any,
+    run_id: (job?.run_id || null) as any,
+    job_id: (job?.id || null) as any,
+    account_id: (job?.account_id || null) as any,
+    merchant_id: (job?.merchant_id || null) as any,
+    job_type: 'reviews_sync',
+    competence: (job?.competence || null) as any,
+  };
 }
 
 async function reserveJobs(limit: number): Promise<IfoodJob[]> {
@@ -52,7 +72,12 @@ async function reserveJobs(limit: number): Promise<IfoodJob[]> {
     .limit(limit * 2);
 
   if (error) {
-    console.error('[ifood-reviews-worker] Erro ao buscar jobs pendentes:', error.message);
+    await logError({
+      ...jobLogContext(null),
+      event: 'ifood.jobs.reserve.error',
+      message: 'Erro ao buscar jobs pendentes',
+      err: error,
+    });
     return [];
   }
 
@@ -103,7 +128,12 @@ async function markJobSuccess(job: IfoodJob) {
     .eq('id', job.id);
 
   if (error) {
-    console.error('[ifood-reviews-worker] Erro ao marcar job como success:', error.message);
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.jobs.mark_success.error',
+      message: 'Erro ao marcar job como success',
+      err: error,
+    });
   }
 }
 
@@ -139,7 +169,13 @@ async function markJobRetry(job: IfoodJob, errorMessage: string) {
     .eq('id', job.id);
 
   if (error) {
-    console.error('[ifood-reviews-worker] Erro ao marcar job como retry/failed:', error.message);
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.jobs.mark_retry.error',
+      message: 'Erro ao marcar job como retry/failed',
+      err: error,
+      data: { desired_status: status, next_retry_at },
+    });
   }
 }
 
@@ -155,18 +191,22 @@ async function getMerchantIdFromAuth(accountId: string): Promise<string | null> 
       .maybeSingle();
 
     if (error) {
-      console.error('[ifood-reviews-worker] Erro ao buscar merchant_id na auth:', {
-        accountId,
-        error: error.message,
+      await logError({
+        ...jobLogContext({ account_id: accountId }),
+        event: 'ifood.auth.fetch_merchant_id.error',
+        message: 'Erro ao buscar merchant_id na auth',
+        err: error,
       });
       return null;
     }
 
     return (data as any)?.ifood_merchant_id || null;
   } catch (err: any) {
-    console.error('[ifood-reviews-worker] Exceção ao buscar merchant_id na auth:', {
-      accountId,
-      message: err?.message || String(err),
+    await logError({
+      ...jobLogContext({ account_id: accountId }),
+      event: 'ifood.auth.fetch_merchant_id.exception',
+      message: 'Exceção ao buscar merchant_id na auth',
+      err,
     });
     return null;
   }
@@ -176,10 +216,21 @@ async function processJob(job: IfoodJob) {
   let merchantId = job.merchant_id;
 
   if (!merchantId) {
-    console.log('[ifood-reviews-worker] Job sem merchant_id, buscando na auth...', { jobId: job.id, accountId: job.account_id });
+    await logEvent({
+      level: 'info',
+      ...jobLogContext(job),
+      event: 'ifood.job.merchant_id.missing',
+      message: 'Job sem merchant_id, buscando na auth',
+    });
     merchantId = await getMerchantIdFromAuth(job.account_id);
     if (!merchantId) {
       await markJobRetry(job, 'merchant_id ausente e não encontrado na tabela auth para esta account.');
+      await logEvent({
+        level: 'warn',
+        ...jobLogContext(job),
+        event: 'ifood.job.merchant_id.not_found',
+        message: 'merchant_id ausente e não encontrado na auth',
+      });
       return;
     }
   }
@@ -193,11 +244,12 @@ async function processJob(job: IfoodJob) {
   };
 
   try {
-    console.log('[ifood-reviews-worker] Disparando reviews sync', {
-      jobId: job.id,
-      accountId: job.account_id,
-      merchantId,
-      url,
+    await logEvent({
+      level: 'info',
+      ...jobLogContext({ ...job, merchant_id: merchantId }),
+      event: 'ifood.reviews.sync.request',
+      message: 'Disparando reviews sync',
+      data: { url, mode: body.mode, days: body.days },
     });
 
     const resp = await fetch(url, {
@@ -212,6 +264,13 @@ async function processJob(job: IfoodJob) {
 
     if (resp.ok) {
       await markJobSuccess(job);
+      await logEvent({
+        level: 'info',
+        ...jobLogContext({ ...job, merchant_id: merchantId }),
+        event: 'ifood.reviews.sync.success',
+        message: 'Reviews sync concluído',
+        data: { http_status: resp.status },
+      });
       return;
     }
 
@@ -219,13 +278,33 @@ async function processJob(job: IfoodJob) {
 
     if (resp.status >= 400 && resp.status < 500) {
       await markJobRetry(job, msg);
+      await logEvent({
+        level: 'warn',
+        ...jobLogContext({ ...job, merchant_id: merchantId }),
+        event: 'ifood.reviews.sync.http_error',
+        message: 'Reviews sync retornou erro HTTP (4xx)',
+        data: { http_status: resp.status, response_preview: text.slice(0, 200) },
+      });
       return;
     }
 
     await markJobRetry(job, msg);
+    await logEvent({
+      level: 'error',
+      ...jobLogContext({ ...job, merchant_id: merchantId }),
+      event: 'ifood.reviews.sync.http_error',
+      message: 'Reviews sync retornou erro HTTP (5xx)',
+      data: { http_status: resp.status, response_preview: text.slice(0, 200) },
+    });
   } catch (err: any) {
     const msg = err?.message || String(err);
     await markJobRetry(job, msg);
+    await logError({
+      ...jobLogContext({ ...job, merchant_id: merchantId }),
+      event: 'ifood.reviews.sync.exception',
+      message: 'Exceção ao executar reviews sync',
+      err,
+    });
   }
 }
 
@@ -237,11 +316,19 @@ async function tick() {
 }
 
 async function main() {
-  console.log('[ifood-reviews-worker] Iniciado', {
-    workerId: WORKER_ID,
-    maxConcurrency: MAX_CONCURRENCY,
-    pollIntervalMs: POLL_INTERVAL_MS,
-    apiBase: DEX_API_BASE_URL,
+  await logEvent({
+    level: 'info',
+    marketplace: 'ifood',
+    source: 'dex-contabo/worker',
+    service: 'ifood-reviews-worker',
+    event: 'worker.start',
+    message: 'Worker iniciado',
+    trace_id: WORKER_ID,
+    data: {
+      maxConcurrency: MAX_CONCURRENCY,
+      pollIntervalMs: POLL_INTERVAL_MS,
+      apiBase: DEX_API_BASE_URL,
+    },
   });
 
   // Loop
@@ -253,6 +340,7 @@ async function main() {
 }
 
 main().catch((e) => {
+  // eslint-disable-next-line no-console
   console.error('[ifood-reviews-worker] fatal', e);
   process.exit(1);
 });

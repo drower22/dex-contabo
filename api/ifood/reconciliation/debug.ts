@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const { data, error } = await supabase
-      .from('ifood_conciliation_logs')
+      .from('app_logs')
       .select('*')
       .eq('run_id', finalRunId)
       .order('created_at', { ascending: true });

@@ -1,4 +1,5 @@
 import { createServiceSupabaseClient, requireAdminUser } from '../_shared/admin-auth';
+import { logEvent } from '../../../services/app-logger';
 
 function getJobId(req: any): string {
   const fromParams = req?.params?.jobId ?? req?.params?.job_id;
@@ -65,19 +66,20 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    await supabase.from('logs').insert({
+    await logEvent({
       level: 'info',
-      message: 'admin.ifood_jobs.retry',
+      marketplace: 'ifood',
+      source: 'dex-contabo/api',
+      service: 'admin-ifood-jobs',
+      event: 'admin.ifood_jobs.retry',
+      message: 'Admin solicitou retry do job',
+      user_id: admin.userId,
       account_id: current.account_id,
-      context: {
-        feature: 'admin_panel',
-        action: 'retry',
-        entity: 'ifood_jobs',
-        job_id: jobId,
-        job_type: current.job_type,
+      job_id: jobId,
+      job_type: current.job_type,
+      data: {
         previous_status: current.status,
         requested_by: admin.email,
-        requested_by_user_id: admin.userId,
         requested_at: nowIso,
       },
     });

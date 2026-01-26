@@ -1,4 +1,5 @@
 import { createServiceSupabaseClient, requireAdminUser } from '../_shared/admin-auth';
+import { logEvent } from '../../../services/app-logger';
 
 function asString(v: any): string {
   return typeof v === 'string' ? v : Array.isArray(v) ? String(v[0] ?? '') : v == null ? '' : String(v);
@@ -91,16 +92,16 @@ export default async function handler(req: any, res: any) {
         return;
       }
 
-      await supabase.from('logs').insert({
+      await logEvent({
         level: 'info',
-        message: 'admin.ifood_global_schedule.update',
-        account_id: null,
-        context: {
-          feature: 'admin_panel',
-          entity: 'ifood_global_schedule',
-          action: 'update',
+        marketplace: 'ifood',
+        source: 'dex-contabo/api',
+        service: 'admin-ifood-global-schedule',
+        event: 'admin.ifood_global_schedule.update',
+        message: 'Atualização do agendamento global iFood',
+        user_id: admin.userId,
+        data: {
           requested_by: admin.email,
-          requested_by_user_id: admin.userId,
           requested_at: new Date().toISOString(),
           patch,
         },

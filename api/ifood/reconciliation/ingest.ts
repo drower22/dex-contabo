@@ -22,6 +22,7 @@ import type { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import * as zlib from 'zlib';
+import { logError, logEvent } from '../../../services/app-logger';
 
 const IFOOD_BASE_URL = (process.env.IFOOD_BASE_URL || process.env.IFOOD_API_URL || 'https://merchant-api.ifood.com.br').trim();
 const IFOOD_PROXY_BASE = process.env.IFOOD_PROXY_BASE?.trim(); // ex: https://proxy.usa-dex.com.br/api/ifood-proxy
@@ -65,20 +66,20 @@ export default async function handler(req: Request, res: Response) {
     metadata?: any,
   ) => {
     try {
-      await supabase.from('ifood_conciliation_logs').insert({
-        run_id: runId,
-        trace_id: traceId,
+      await logEvent({
         level,
-        step,
+        marketplace: 'ifood',
+        source: 'dex-contabo/api',
+        service: 'ifood-reconciliation-ingest',
+        event: `ifood.conciliation.${step}`,
         message,
-        metadata: metadata ? JSON.parse(JSON.stringify(metadata)) : null,
+        trace_id: traceId,
+        run_id: runId,
+        data: metadata ? JSON.parse(JSON.stringify(metadata)) : {},
       });
     } catch (err: any) {
-      console.error('[reconciliation-ingest] log_insert_failed', {
-        traceId,
-        step,
-        error: err?.message,
-      });
+      // eslint-disable-next-line no-console
+      console.error('[reconciliation-ingest] log_emit_failed', { traceId, step, error: err?.message });
     }
   };
 
@@ -91,19 +92,21 @@ export default async function handler(req: Request, res: Response) {
     context?: any,
   ) => {
     try {
-      await supabase.from('logs').insert({
+      await logEvent({
         level,
-        message,
+        marketplace: 'ifood',
+        source: 'dex-contabo/api',
+        service: 'ifood-reconciliation-ingest',
+        event: String(message || 'ifood.conciliation.event'),
+        message: String(message || 'conciliation'),
+        trace_id: traceId,
+        run_id: runId,
         account_id: accountIdForLog ?? null,
-        context: context ? JSON.parse(JSON.stringify(context)) : null,
+        data: context ? JSON.parse(JSON.stringify(context)) : {},
       });
     } catch (err: any) {
-      console.error('[reconciliation-ingest] central_log_insert_failed', {
-        traceId,
-        level,
-        message,
-        error: err?.message,
-      });
+      // eslint-disable-next-line no-console
+      console.error('[reconciliation-ingest] central_log_emit_failed', { traceId, level, message, error: err?.message });
     }
   };
 
