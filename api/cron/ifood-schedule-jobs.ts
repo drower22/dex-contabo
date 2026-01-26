@@ -164,8 +164,7 @@ export default async function handler(req: any, res: any) {
     const { data: accounts, error: accountsError } = await supabase
       .from('accounts')
       .select('id, ifood_merchant_id, is_active')
-      .eq('is_active', true)
-      .not('ifood_merchant_id', 'is', null);
+      .eq('is_active', true);
 
     if (accountsError) {
       // eslint-disable-next-line no-console
@@ -174,7 +173,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const baseAccounts = (accounts || []).filter((row: any) => row?.id && row?.ifood_merchant_id);
+    const baseAccounts = (accounts || []).filter((row: any) => row?.id);
 
     if (dryRun) {
       res.status(200).json({
