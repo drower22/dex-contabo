@@ -52,6 +52,42 @@ interface AnticipationItem {
   }>;
 }
 
+async function resolveMerchantId(accountId: string, traceId: string): Promise<string | null> {
+  const { data: authRow, error: authError } = await supabase
+    .from('ifood_store_auth')
+    .select('ifood_merchant_id')
+    .eq('account_id', accountId)
+    .eq('scope', 'financial')
+    .maybeSingle();
+
+  if (authError) {
+    console.warn('[anticipations-sync] Falha ao buscar merchantId em ifood_store_auth', {
+      trace_id: traceId,
+      accountId,
+      error: authError.message,
+    });
+  }
+
+  const authMerchantId = (authRow as any)?.ifood_merchant_id as string | undefined;
+  if (authMerchantId) return authMerchantId;
+
+  const { data: accountRow, error: accountError } = await supabase
+    .from('accounts')
+    .select('ifood_merchant_id')
+    .eq('id', accountId)
+    .maybeSingle();
+
+  if (accountError) {
+    console.warn('[anticipations-sync] Falha ao buscar merchantId em accounts', {
+      trace_id: traceId,
+      accountId,
+      error: accountError.message,
+    });
+  }
+
+  return ((accountRow as any)?.ifood_merchant_id as string | undefined) ?? null;
+}
+
 async function getIfoodToken(accountId: string, traceId: string): Promise<string> {
   console.log('🔑 [anticipations-sync] Obtendo token para accountId (Edge Function ifood-get-token):', {
     trace_id: traceId,
@@ -105,13 +141,29 @@ export default async function handler(req: Request, res: Response) {
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const { merchantId, accountId: accountIdRaw, storeId: storeIdRaw, startDate: startDateRaw, endDate: endDateRaw } = req.body;
+    const {
+      merchantId: merchantIdRaw,
+      accountId: accountIdRaw,
+      storeId: storeIdRaw,
+      startDate: startDateRaw,
+      endDate: endDateRaw,
+    } = req.body;
     const accountId = (accountIdRaw || storeIdRaw) as string | undefined;
 
-    if (!merchantId || !accountId) {
+    if (!accountId) {
       return res.status(400).json({
         error: 'Missing required parameters',
-        message: 'merchantId and accountId (or storeId) are required',
+        message: 'accountId (or storeId) is required',
+      });
+    }
+
+    const merchantId = (merchantIdRaw as string | undefined) ?? (await resolveMerchantId(accountId, traceId));
+
+    if (!merchantId) {
+      return res.status(400).json({
+        error: 'Missing required parameters',
+        message: 'merchantId is required (or must exist in ifood_store_auth for this account)',
+        trace_id: traceId,
       });
     }
 
@@ -158,9 +210,13 @@ export default async function handler(req: Request, res: Response) {
         windowEnd.setTime(end.getTime());
       }
 
+      const begin = currentStart.toISOString().slice(0, 10);
+      const endWindow = windowEnd.toISOString().slice(0, 10);
       const windowParams = {
-        beginCalculationDate: currentStart.toISOString().slice(0, 10),
-        endCalculationDate: windowEnd.toISOString().slice(0, 10),
+        beginCalculationDate: begin,
+        endCalculationDate: endWindow,
+        beginAnticipatedPaymentDate: begin,
+        endAnticipatedPaymentDate: endWindow,
       } as const;
 
       console.log('[anticipations-sync] Chamando API de anticipations (janela)', {
