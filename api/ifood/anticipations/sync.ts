@@ -277,13 +277,10 @@ export default async function handler(req: Request, res: Response) {
           });
 
           apiResponse = await axios.get(proxyUrl.toString(), {
-            // Desativar descompressão automática do Axios em Node.js para evitar
-            // erros de zlib ("incorrect header check") em respostas via proxy.
-            decompress: false,
-            responseType: 'arraybuffer',
             headers: {
               'x-shared-key': IFOOD_PROXY_KEY!,
               'Authorization': `Bearer ${accessToken}`,
+              'Accept-Encoding': 'identity',
               'Accept': 'application/json',
             },
           });
