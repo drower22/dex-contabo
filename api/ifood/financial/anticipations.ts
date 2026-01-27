@@ -118,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Usar proxy (recomendado - evita bloqueio de IP)
       // Importante: embutir os parâmetros de data dentro do próprio path, pois o proxydex
       // apenas repassa o path (com query) para o iFood.
-      const path = `/financial/v3.0/merchants/${merchantId}/anticipations?beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
+      const path = `/financial/v3.0/merchants/${merchantId}/anticipations?beginCalculationDate=${from}&endCalculationDate=${to}`;
       url = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(path)}`;
       headers = {
         'x-shared-key': IFOOD_PROXY_KEY,
@@ -128,7 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log('[anticipations] 🔄 Using proxy:', { url: url.replace(IFOOD_PROXY_KEY, '***') });
     } else {
       // Fallback: chamada direta (pode ser bloqueada)
-      url = `${IFOOD_BASE_URL}/financial/v3.0/merchants/${merchantId}/anticipations?beginAnticipatedPaymentDate=${from}&endAnticipatedPaymentDate=${to}`;
+      url = `${IFOOD_BASE_URL}/financial/v3.0/merchants/${merchantId}/anticipations?beginCalculationDate=${from}&endCalculationDate=${to}`;
       headers = {
         'Authorization': `Bearer ${accessToken}`,
         'accept': 'application/json',
