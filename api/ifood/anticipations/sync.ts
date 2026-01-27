@@ -20,6 +20,7 @@ import type { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { createHash, randomUUID } from 'crypto';
 import axios from 'axios';
+import zlib from 'zlib';
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -32,13 +33,26 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 function normalizeUpstreamData(raw: unknown, traceId: string): any {
   try {
     if (raw == null) return raw;
+    if (typeof raw === 'string') return JSON.parse(raw);
+
+    let buf: Buffer | null = null;
+
     if (Buffer.isBuffer(raw)) {
-      const text = raw.toString('utf8');
+      buf = raw;
+    } else if (raw instanceof ArrayBuffer) {
+      buf = Buffer.from(raw);
+    } else if (ArrayBuffer.isView(raw)) {
+      const view = raw as ArrayBufferView;
+      buf = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
+    }
+
+    if (buf) {
+      const isGzip = buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+      const decoded = isGzip ? zlib.gunzipSync(buf) : buf;
+      const text = decoded.toString('utf8');
       return JSON.parse(text);
     }
-    if (typeof raw === 'string') {
-      return JSON.parse(raw);
-    }
+
     return raw;
   } catch (err: any) {
     console.warn('[anticipations-sync] Falha ao normalizar upstream data', {
