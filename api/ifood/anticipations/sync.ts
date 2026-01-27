@@ -29,6 +29,28 @@ const IFOOD_PROXY_KEY = process.env.IFOOD_PROXY_KEY?.trim();
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+function normalizeUpstreamData(raw: unknown, traceId: string): any {
+  try {
+    if (raw == null) return raw;
+    if (Buffer.isBuffer(raw)) {
+      const text = raw.toString('utf8');
+      return JSON.parse(text);
+    }
+    if (typeof raw === 'string') {
+      return JSON.parse(raw);
+    }
+    return raw;
+  } catch (err: any) {
+    console.warn('[anticipations-sync] Falha ao normalizar upstream data', {
+      trace_id: traceId,
+      rawType: typeof raw,
+      rawPreview: typeof raw === 'string' ? raw.slice(0, 200) : null,
+      error: err?.message ?? String(err),
+    });
+    return raw;
+  }
+}
+
 interface AnticipationItem {
   anticipationId: string;
   balanceId?: string;
@@ -244,6 +266,7 @@ export default async function handler(req: Request, res: Response) {
             // Desativar descompressão automática do Axios em Node.js para evitar
             // erros de zlib ("incorrect header check") em respostas via proxy.
             decompress: false,
+            responseType: 'arraybuffer',
             headers: {
               'x-shared-key': IFOOD_PROXY_KEY!,
               'Authorization': `Bearer ${accessToken}`,
@@ -271,7 +294,7 @@ export default async function handler(req: Request, res: Response) {
         // {
         //   beginDate, endDate, balance, merchantId, settlements: [...]
         // }
-        const responseData = apiResponse.data;
+        const responseData = normalizeUpstreamData(apiResponse.data, traceId);
         const windowData: AnticipationItem[] =
           responseData?.settlements ||
           responseData?.data ||
