@@ -223,9 +223,14 @@ async function processAnticipationsJob(job: IfoodJob) {
   }
 
   const url = `${DEX_API_BASE_URL}/api/ifood/anticipations/sync`;
+  const endDate = new Date();
+  const startDate = new Date(endDate);
+  startDate.setDate(startDate.getDate() - 90);
   const body = {
-    storeId: job.account_id,
+    accountId: job.account_id,
     merchantId: job.merchant_id,
+    startDate: startDate.toISOString().slice(0, 10),
+    endDate: endDate.toISOString().slice(0, 10),
     triggerSource: 'anticipations_daily_job',
   };
 
@@ -270,7 +275,7 @@ async function processAnticipationsJob(job: IfoodJob) {
         ...jobLogContext(job),
         event: 'ifood.anticipations.sync.success',
         message: 'Job de antecipações concluído com sucesso',
-        data: { savedCount: parsed?.savedCount ?? null, http_status: response.status },
+        data: { count: parsed?.count ?? null, inserted: parsed?.inserted ?? null, http_status: response.status },
       });
       return;
     }

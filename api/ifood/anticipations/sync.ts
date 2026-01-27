@@ -105,14 +105,22 @@ export default async function handler(req: Request, res: Response) {
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const { merchantId, accountId, startDate, endDate } = req.body;
+    const { merchantId, accountId: accountIdRaw, storeId: storeIdRaw, startDate: startDateRaw, endDate: endDateRaw } = req.body;
+    const accountId = (accountIdRaw || storeIdRaw) as string | undefined;
 
-    if (!merchantId || !accountId || !startDate || !endDate) {
+    if (!merchantId || !accountId) {
       return res.status(400).json({
         error: 'Missing required parameters',
-        message: 'merchantId, accountId, startDate, and endDate are required'
+        message: 'merchantId and accountId (or storeId) are required',
       });
     }
+
+    const endDate = (endDateRaw as string | undefined) ?? new Date().toISOString().slice(0, 10);
+    const startDate = (startDateRaw as string | undefined) ?? (() => {
+      const d = new Date(endDate);
+      d.setDate(d.getDate() - 90);
+      return d.toISOString().slice(0, 10);
+    })();
 
     console.log(`[anticipations-sync] Iniciando sync para merchant ${merchantId}`, {
       trace_id: traceId,
