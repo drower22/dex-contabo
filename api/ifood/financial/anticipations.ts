@@ -87,12 +87,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Busca merchantId a partir da ifood_store_auth (fonte principal)
     const { data: authStore } = await supabase
       .from('ifood_store_auth')
-      .select('merchant_id')
+      .select('ifood_merchant_id')
       .eq('account_id', accountId)
       .eq('scope', 'financial')
       .maybeSingle();
 
-    let merchantId = authStore?.merchant_id as string | undefined;
+    let merchantId = authStore?.ifood_merchant_id as string | undefined;
 
     // Fallback: se não houver merchant_id em ifood_store_auth, tentar na tabela accounts
     if (!merchantId) {
