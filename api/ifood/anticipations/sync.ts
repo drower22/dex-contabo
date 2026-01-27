@@ -215,8 +215,6 @@ export default async function handler(req: Request, res: Response) {
       const windowParams = {
         beginCalculationDate: begin,
         endCalculationDate: endWindow,
-        beginAnticipatedPaymentDate: begin,
-        endAnticipatedPaymentDate: endWindow,
       } as const;
 
       console.log('[anticipations-sync] Chamando API de anticipations (janela)', {
