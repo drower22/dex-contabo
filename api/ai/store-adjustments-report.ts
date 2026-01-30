@@ -17,6 +17,23 @@ function getBearerToken(headerValue: unknown): string | null {
   return trimmed;
 }
 
+function formatPtBrDateTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return iso;
+    return d.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
 export default async function handler(req: Request, res: Response) {
   const traceId = randomUUID();
   res.setHeader('X-Trace-Id', traceId);
@@ -90,17 +107,58 @@ export default async function handler(req: Request, res: Response) {
 
     const adjustments = (rows ?? []) as any[];
 
+    const createdByIds = Array.from(
+      new Set(
+        adjustments
+          .map((a) => (typeof a?.created_by === 'string' ? a.created_by.trim() : ''))
+          .filter(Boolean)
+      )
+    );
+
+    const nameByAuthId = new Map<string, string>();
+    if (createdByIds.length > 0) {
+      try {
+        const { data: usersData, error: usersErr } = await supabase
+          .from('users')
+          .select('auth_user_id, user_name, email')
+          .in('auth_user_id', createdByIds);
+
+        if (usersErr) {
+          console.warn('[ai/store-adjustments-report] users lookup failed', {
+            trace_id: traceId,
+            message: usersErr.message,
+          });
+        } else {
+          for (const u of usersData ?? []) {
+            const id = typeof (u as any)?.auth_user_id === 'string' ? (u as any).auth_user_id.trim() : '';
+            if (!id) continue;
+            const display = String((u as any)?.user_name || (u as any)?.email || '').trim();
+            if (display) nameByAuthId.set(id, display);
+          }
+        }
+      } catch (e: any) {
+        console.warn('[ai/store-adjustments-report] users lookup threw', {
+          trace_id: traceId,
+          message: e?.message || String(e),
+        });
+      }
+    }
+
     const safeStoreName = typeof storeName === 'string' ? storeName.trim() : '';
     const safePeriodLabel = typeof periodLabel === 'string' ? periodLabel.trim() : '';
 
     const listText = adjustments
       .map((a) => {
-        const dt = a?.created_at ? new Date(a.created_at).toISOString() : '';
+        const createdAtIso = a?.created_at ? String(a.created_at) : '';
+        const dt = createdAtIso ? formatPtBrDateTime(createdAtIso) : '';
+        const createdBy = typeof a?.created_by === 'string' ? a.created_by.trim() : '';
+        const who = createdBy ? (nameByAuthId.get(createdBy) || `Usuário ${createdBy.slice(0, 8)}`) : '';
         const what = String(a?.what_was_done ?? '').trim();
         const why = String(a?.why_was_done ?? '').trim();
         const exp = String(a?.expected_results ?? '').trim();
         return [
           `- Data: ${dt}`,
+          who ? `  - Responsável: ${who}` : null,
           what ? `  - O que foi feito: ${what}` : null,
           why ? `  - Por que foi feito: ${why}` : null,
           exp ? `  - Resultado esperado: ${exp}` : null,
@@ -120,12 +178,16 @@ export default async function handler(req: Request, res: Response) {
       '- Seja objetivo, porém amigável e fácil de ler por um cliente.',
       '- Quando houver muitos itens repetidos, agrupe por tema.',
       '- Se não houver ajustes no período, retorne um relatório curto explicando que não houve registros.',
+      '- Inclua datas e horários em formato brasileiro (dd/mm/aaaa hh:mm:ss) sempre que estiverem disponíveis.',
       '',
       'Estrutura do Markdown:',
       '# Relatório de Ajustes',
       '## Período',
       '## Resumo executivo (3 a 6 bullets)',
-      '## Ajustes realizados (bullets agrupados por tema)',
+      '## Linha do tempo (detalhada)',
+      '- Liste cada ajuste individualmente com: data/hora, responsável (se houver), o que foi feito, por que foi feito e resultado esperado.',
+      '- Use subtítulos (###) por ajuste para facilitar leitura.',
+      '## Ajustes realizados (visão agrupada por tema)',
       '## Próximos passos sugeridos (somente se deriváveis dos próprios ajustes; caso contrário, mantenha genérico)',
     ].join('\n');
 
