@@ -195,6 +195,8 @@ const adminAccountsHandler = loadHandler('./admin/accounts');
 const adminClientsHandler = loadHandler('./admin/clients');
 const adminManagersHandler = loadHandler('./admin/managers');
 const adminManagersInviteHandler = loadHandler('./admin/managers-invite');
+const adminManagersClientsHandler = loadHandler('./admin/managers-clients');
+const adminManagersStatusHandler = loadHandler('./admin/managers-status');
 
 // Me
 
@@ -360,6 +362,24 @@ if (adminManagersInviteHandler) {
 } else {
   app.post('/api/admin/managers/invite', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Admin managers invite handler not loaded' });
+  });
+}
+
+if (adminManagersClientsHandler) {
+  app.put('/api/admin/managers/:managerId/clients', adaptVercelHandler(adminManagersClientsHandler));
+  console.log('✅ Admin managers clients handler loaded');
+} else {
+  app.put('/api/admin/managers/:managerId/clients', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin managers clients handler not loaded' });
+  });
+}
+
+if (adminManagersStatusHandler) {
+  app.patch('/api/admin/managers/:managerId/status', adaptVercelHandler(adminManagersStatusHandler));
+  console.log('✅ Admin managers status handler loaded');
+} else {
+  app.patch('/api/admin/managers/:managerId/status', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin managers status handler not loaded' });
   });
 }
 

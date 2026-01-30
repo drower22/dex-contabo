@@ -23,7 +23,7 @@ export default async function handler(req: any, res: any) {
 
     let q = supabase
       .from('agency_users')
-      .select('id, email, agency_id, role, created_at')
+      .select('id, email, agency_id, role, is_active, created_at')
       .eq('role', 'manager')
       .order('created_at', { ascending: false });
 

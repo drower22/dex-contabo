@@ -62,6 +62,18 @@ export default async function handler(req: any, res: any) {
 
     const supabase = createServiceSupabaseClient();
 
+    const { data: existingAgencyUser, error: existingAgencyUserErr } = await supabase
+      .from('agency_users')
+      .select('id, email')
+      .ilike('email', email)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingAgencyUserErr) {
+      res.status(500).json({ error: 'agency_user_lookup_failed', message: existingAgencyUserErr.message });
+      return;
+    }
+
     const redirectTo = getRedirectTo(req);
 
     let userId: string | null = null;
@@ -99,11 +111,22 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    // If there is already an agency_users record with this email, always reuse its id.
+    // This makes the operation idempotent even if Auth userId differs.
+    if (existingAgencyUser?.id) {
+      userId = String(existingAgencyUser.id);
+    }
+
     const { error: upsertErr } = await supabase
       .from('agency_users')
-      .upsert({ id: userId, email, agency_id: agencyId, role: 'manager' }, { onConflict: 'id' });
+      .upsert({ id: userId, email, agency_id: agencyId, role: 'manager', is_active: true }, { onConflict: 'id' });
 
     if (upsertErr) {
+      const msg = String(upsertErr.message || '');
+      if (msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('unique')) {
+        res.status(409).json({ error: 'duplicate_email', message: upsertErr.message });
+        return;
+      }
       res.status(500).json({ error: 'agency_users_upsert_failed', message: upsertErr.message });
       return;
     }
