@@ -192,6 +192,11 @@ const adminIfoodJobsRunNowHandler = loadHandler('./admin/ifood/jobs-run-now');
 const adminIfoodGlobalScheduleHandler = loadHandler('./admin/ifood/global-schedule');
 const adminAgenciesHandler = loadHandler('./admin/agencies');
 const adminAccountsHandler = loadHandler('./admin/accounts');
+const adminClientsHandler = loadHandler('./admin/clients');
+const adminManagersHandler = loadHandler('./admin/managers');
+const adminManagersInviteHandler = loadHandler('./admin/managers-invite');
+
+// Me
 
 // DEBUG: Verificar carregamento dos handlers
 console.log('🔍 DEBUG salesSyncHandler:', salesSyncHandler ? 'LOADED ✅' : 'NULL ❌');
@@ -328,6 +333,33 @@ if (adminAccountsHandler) {
 } else {
   app.get('/api/admin/accounts', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Admin accounts handler not loaded' });
+  });
+}
+
+if (adminClientsHandler) {
+  app.get('/api/admin/clients', adaptVercelHandler(adminClientsHandler));
+  console.log('✅ Admin clients handler loaded');
+} else {
+  app.get('/api/admin/clients', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin clients handler not loaded' });
+  });
+}
+
+if (adminManagersHandler) {
+  app.get('/api/admin/managers', adaptVercelHandler(adminManagersHandler));
+  console.log('✅ Admin managers handler loaded');
+} else {
+  app.get('/api/admin/managers', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin managers handler not loaded' });
+  });
+}
+
+if (adminManagersInviteHandler) {
+  app.post('/api/admin/managers/invite', adaptVercelHandler(adminManagersInviteHandler));
+  console.log('✅ Admin managers invite handler loaded');
+} else {
+  app.post('/api/admin/managers/invite', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin managers invite handler not loaded' });
   });
 }
 

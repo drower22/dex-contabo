@@ -690,7 +690,40 @@ export default async function handler(req: Request, res: Response) {
       });
     }
     // 10. Disparar processamento Python
-    const processEndpoint = process.env.BACKEND_PROCESS_URL || 'http://127.0.0.1:8000/processar-planilha-conciliacao';
+    const envProcessEndpoint = (process.env.BACKEND_PROCESS_URL || '').trim();
+    const isDev = (process.env.NODE_ENV || '').trim() === 'development';
+    const processEndpoint = envProcessEndpoint || (isDev ? 'http://127.0.0.1:8000/processar-planilha-conciliacao' : '');
+
+    if (!processEndpoint) {
+      await logToDb('error', 'processing', 'BACKEND_PROCESS_URL não configurada (produção)', {
+        node_env: process.env.NODE_ENV,
+      });
+      await logCentral('error', 'ifood_conciliation.error', accountId ?? null, {
+        feature: 'ifood_conciliation',
+        system: 'dex-api',
+        stage: 'python_trigger',
+        status: 'error',
+        run_id: runId,
+        trace_id: traceId,
+        error_stage: 'python_trigger',
+        error_message: 'missing_backend_process_url',
+      });
+      await persistRun({
+        status: 'error',
+        finished_at: new Date().toISOString(),
+        error_message: 'missing_backend_process_url',
+      });
+      return res.status(500).json({
+        success: false,
+        error: 'BACKEND_PROCESS_URL não configurada',
+        details: {
+          hint: 'Configure a variável de ambiente BACKEND_PROCESS_URL apontando para o serviço Python (ex.: https://<host>/processar-planilha-conciliacao).',
+          nodeEnv: process.env.NODE_ENV ?? null,
+        },
+        runId,
+        traceId,
+      });
+    }
 
     const pythonPayload = {
       file_id: receivedFileId,
