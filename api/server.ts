@@ -192,6 +192,7 @@ const adminIfoodJobsRunNowHandler = loadHandler('./admin/ifood/jobs-run-now');
 const adminIfoodGlobalScheduleHandler = loadHandler('./admin/ifood/global-schedule');
 const adminAgenciesHandler = loadHandler('./admin/agencies');
 const adminAccountsHandler = loadHandler('./admin/accounts');
+const adminAccountsStatusHandler = loadHandler('./admin/accounts-status');
 const adminClientsHandler = loadHandler('./admin/clients');
 const adminClientsCreateHandler = loadHandler('./admin/clients-create');
 const adminManagersHandler = loadHandler('./admin/managers');
@@ -341,6 +342,15 @@ if (adminAccountsHandler) {
 } else {
   app.get('/api/admin/accounts', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Admin accounts handler not loaded' });
+  });
+}
+
+if (adminAccountsStatusHandler) {
+  app.patch('/api/admin/accounts/:accountId/status', adaptVercelHandler(adminAccountsStatusHandler));
+  console.log('✅ Admin accounts status handler loaded');
+} else {
+  app.patch('/api/admin/accounts/:accountId/status', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin accounts status handler not loaded' });
   });
 }
 
