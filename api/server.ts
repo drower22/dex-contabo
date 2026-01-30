@@ -193,10 +193,16 @@ const adminIfoodGlobalScheduleHandler = loadHandler('./admin/ifood/global-schedu
 const adminAgenciesHandler = loadHandler('./admin/agencies');
 const adminAccountsHandler = loadHandler('./admin/accounts');
 const adminClientsHandler = loadHandler('./admin/clients');
+const adminClientsCreateHandler = loadHandler('./admin/clients-create');
 const adminManagersHandler = loadHandler('./admin/managers');
 const adminManagersInviteHandler = loadHandler('./admin/managers-invite');
 const adminManagersClientsHandler = loadHandler('./admin/managers-clients');
 const adminManagersStatusHandler = loadHandler('./admin/managers-status');
+const adminUsersHandler = loadHandler('./admin/users');
+const adminUsersInviteHandler = loadHandler('./admin/users-invite');
+const adminUsersClientHandler = loadHandler('./admin/users-client');
+const adminUsersStatusHandler = loadHandler('./admin/users-status');
+const adminAccountsCreateHandler = loadHandler('./admin/accounts-create');
 
 // Me
 
@@ -338,12 +344,66 @@ if (adminAccountsHandler) {
   });
 }
 
+if (adminAccountsCreateHandler) {
+  app.post('/api/admin/accounts/create', adaptVercelHandler(adminAccountsCreateHandler));
+  console.log('✅ Admin accounts create handler loaded');
+} else {
+  app.post('/api/admin/accounts/create', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin accounts create handler not loaded' });
+  });
+}
+
+if (adminUsersHandler) {
+  app.get('/api/admin/users', adaptVercelHandler(adminUsersHandler));
+  console.log('✅ Admin users handler loaded');
+} else {
+  app.get('/api/admin/users', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin users handler not loaded' });
+  });
+}
+
+if (adminUsersInviteHandler) {
+  app.post('/api/admin/users/invite', adaptVercelHandler(adminUsersInviteHandler));
+  console.log('✅ Admin users invite handler loaded');
+} else {
+  app.post('/api/admin/users/invite', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin users invite handler not loaded' });
+  });
+}
+
+if (adminUsersClientHandler) {
+  app.put('/api/admin/users/:userId/client', adaptVercelHandler(adminUsersClientHandler));
+  console.log('✅ Admin users client handler loaded');
+} else {
+  app.put('/api/admin/users/:userId/client', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin users client handler not loaded' });
+  });
+}
+
+if (adminUsersStatusHandler) {
+  app.patch('/api/admin/users/:userId/status', adaptVercelHandler(adminUsersStatusHandler));
+  console.log('✅ Admin users status handler loaded');
+} else {
+  app.patch('/api/admin/users/:userId/status', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin users status handler not loaded' });
+  });
+}
+
 if (adminClientsHandler) {
   app.get('/api/admin/clients', adaptVercelHandler(adminClientsHandler));
   console.log('✅ Admin clients handler loaded');
 } else {
   app.get('/api/admin/clients', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Admin clients handler not loaded' });
+  });
+}
+
+if (adminClientsCreateHandler) {
+  app.post('/api/admin/clients/create', adaptVercelHandler(adminClientsCreateHandler));
+  console.log('✅ Admin clients create handler loaded');
+} else {
+  app.post('/api/admin/clients/create', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin clients create handler not loaded' });
   });
 }
 

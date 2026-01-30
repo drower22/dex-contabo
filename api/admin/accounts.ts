@@ -32,7 +32,7 @@ export default async function handler(req: any, res: any) {
 
     let q = supabase
       .from('accounts')
-      .select('id, account_name, ifood_merchant_id, agency_id, is_active')
+      .select('id, account_name, ifood_merchant_id, agency_id, client_id, is_active, created_at')
       .order('account_name', { ascending: true });
 
     if (agencyId) q = q.eq('agency_id', agencyId);
