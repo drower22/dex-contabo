@@ -154,14 +154,12 @@ export default async function handler(req: Request, res: Response) {
         const createdBy = typeof a?.created_by === 'string' ? a.created_by.trim() : '';
         const who = createdBy ? (nameByAuthId.get(createdBy) || `Usuário ${createdBy.slice(0, 8)}`) : '';
         const what = String(a?.what_was_done ?? '').trim();
-        const why = String(a?.why_was_done ?? '').trim();
         const exp = String(a?.expected_results ?? '').trim();
         return [
           `- Data: ${dt}`,
           who ? `  - Responsável: ${who}` : null,
           what ? `  - O que foi feito: ${what}` : null,
-          why ? `  - Por que foi feito: ${why}` : null,
-          exp ? `  - Resultado esperado: ${exp}` : null,
+          exp ? `  - Resultado esperado/objetivo: ${exp}` : null,
         ]
           .filter(Boolean)
           .join('\n');
@@ -169,13 +167,15 @@ export default async function handler(req: Request, res: Response) {
       .join('\n');
 
     const system = [
-      'Você é um assistente especializado em gerar relatórios profissionais e claros para clientes (pt-BR).',
-      'Você receberá uma lista de ajustes realizados em uma loja e deve produzir um relatório em Markdown.',
+      'Você é um assistente especializado em gerar relatórios profissionais e claros para clientes finais (pt-BR).',
+      'Você receberá uma lista de ajustes realizados em uma loja e deve produzir um relatório em Markdown, pronto para ser enviado ao cliente.',
       'Regras obrigatórias:',
       '- Idioma: pt-BR.',
       '- Não use emojis.',
       '- Não invente dados, números ou resultados. Use apenas o que estiver no material fornecido.',
       '- Seja objetivo, porém amigável e fácil de ler por um cliente.',
+      '- O cliente não precisa de justificativas internas. NÃO explique "porquês"; foque em comunicar o que foi feito e transmitir a sensação de acompanhamento e trabalho contínuo.',
+      '- Evite termos técnicos e detalhes operacionais internos. Use linguagem clara.',
       '- Quando houver muitos itens repetidos, agrupe por tema.',
       '- Se não houver ajustes no período, retorne um relatório curto explicando que não houve registros.',
       '- Inclua datas e horários em formato brasileiro (dd/mm/aaaa hh:mm:ss) sempre que estiverem disponíveis.',
@@ -183,12 +183,11 @@ export default async function handler(req: Request, res: Response) {
       'Estrutura do Markdown:',
       '# Relatório de Ajustes',
       '## Período',
-      '## Resumo executivo (3 a 6 bullets)',
+      '## Resumo do período (3 a 6 bullets)',
       '## Linha do tempo (detalhada)',
-      '- Liste cada ajuste individualmente com: data/hora, responsável (se houver), o que foi feito, por que foi feito e resultado esperado.',
+      '- Liste cada ajuste individualmente com: data/hora, responsável (se houver), o que foi feito e objetivo/resultado esperado.',
       '- Use subtítulos (###) por ajuste para facilitar leitura.',
-      '## Ajustes realizados (visão agrupada por tema)',
-      '## Próximos passos sugeridos (somente se deriváveis dos próprios ajustes; caso contrário, mantenha genérico)',
+      '## Próximos passos (curto e genérico, sem promessas e sem números)',
     ].join('\n');
 
     const user = [
