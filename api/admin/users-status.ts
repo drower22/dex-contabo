@@ -26,7 +26,12 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const userId = asString(req.query?.userId ?? req.query?.id ?? req.query?.user_id).trim();
+    const userId = asString(
+      req.params?.userId ??
+        req.query?.userId ??
+        req.query?.id ??
+        req.query?.user_id
+    ).trim();
     const isActive = asBoolean(req.body?.is_active ?? req.body?.isActive);
 
     if (!userId) {

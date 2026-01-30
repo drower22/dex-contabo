@@ -26,7 +26,12 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const accountId = asString(req.query?.accountId ?? req.query?.id ?? req.query?.account_id).trim();
+    const accountId = asString(
+      req.params?.accountId ??
+        req.query?.accountId ??
+        req.query?.id ??
+        req.query?.account_id
+    ).trim();
     const isActive = asBoolean(req.body?.is_active ?? req.body?.isActive);
     const reasonCode = asString(req.body?.reason_code ?? req.body?.reasonCode).trim();
     const reasonDetail = asString(req.body?.reason_detail ?? req.body?.reasonDetail).trim();

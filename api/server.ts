@@ -4,7 +4,10 @@
  * Carrega handlers TypeScript diretamente usando ts-node
  */
 // Registrar ts-node para permitir require() de arquivos .ts
-require('ts-node/register');
+try {
+  require('ts-node/register');
+} catch (e) {
+}
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -191,6 +194,7 @@ const adminIfoodJobsRetryHandler = loadHandler('./admin/ifood/jobs-retry');
 const adminIfoodJobsRunNowHandler = loadHandler('./admin/ifood/jobs-run-now');
 const adminIfoodGlobalScheduleHandler = loadHandler('./admin/ifood/global-schedule');
 const adminAgenciesHandler = loadHandler('./admin/agencies');
+const adminAgenciesCreateHandler = loadHandler('./admin/agencies-create');
 const adminAccountsHandler = loadHandler('./admin/accounts');
 const adminAccountsStatusHandler = loadHandler('./admin/accounts-status');
 const adminClientsHandler = loadHandler('./admin/clients');
@@ -333,6 +337,15 @@ if (adminAgenciesHandler) {
 } else {
   app.get('/api/admin/agencies', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Admin agencies handler not loaded' });
+  });
+}
+
+if (adminAgenciesCreateHandler) {
+  app.post('/api/admin/agencies/create', adaptVercelHandler(adminAgenciesCreateHandler));
+  console.log('✅ Admin agencies create handler loaded');
+} else {
+  app.post('/api/admin/agencies/create', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Admin agencies create handler not loaded' });
   });
 }
 

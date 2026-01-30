@@ -17,7 +17,12 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const userId = asString(req.query?.userId ?? req.query?.id ?? req.query?.user_id).trim();
+    const userId = asString(
+      req.params?.userId ??
+        req.query?.userId ??
+        req.query?.id ??
+        req.query?.user_id
+    ).trim();
     const clientId = asString(req.body?.client_id ?? req.body?.clientId).trim();
 
     if (!userId) {
