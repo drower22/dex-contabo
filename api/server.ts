@@ -181,7 +181,7 @@ const reviewsSyncHandler = loadHandler('./ifood/reviews/sync');
 
 // AI
 const aiReviewsReplyHandler = loadHandler('./ai/reviews-reply');
-const aiStoreAdjustmentsReportHandler = loadHandler('./ai/store-adjustments-report');
+const aiStoreAdjustmentsImproveHandler = loadHandler('./ai/store-adjustments-improve');
 console.log('🔍 DEBUG: reviewsSyncHandler exists?', !!reviewsSyncHandler);
 if (reviewsSyncHandler) {
   console.log('🔍 DEBUG: reviewsSyncHandler type:', typeof reviewsSyncHandler);
@@ -619,12 +619,12 @@ if (aiReviewsReplyHandler) {
   });
 }
 
-if (aiStoreAdjustmentsReportHandler) {
-  app.post('/api/ai/store-adjustments-report', aiStoreAdjustmentsReportHandler);
-  console.log('✅ AI store-adjustments-report handler loaded');
+if (aiStoreAdjustmentsImproveHandler) {
+  app.post('/api/ai/store-adjustments-improve', aiStoreAdjustmentsImproveHandler);
+  console.log('✅ AI store-adjustments-improve handler loaded');
 } else {
-  app.post('/api/ai/store-adjustments-report', (req: Request, res: Response) => {
-    res.status(500).json({ error: 'AI store-adjustments-report handler not loaded' });
+  app.post('/api/ai/store-adjustments-improve', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'AI store-adjustments-improve handler not loaded' });
   });
 }
 
