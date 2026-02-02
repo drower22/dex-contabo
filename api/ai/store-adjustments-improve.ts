@@ -79,18 +79,29 @@ export default async function handler(req: Request, res: Response) {
     }
 
     const system = [
-      'Você é um revisor de texto (pt-BR) que melhora textos para ficarem no formato de relatório.',
-      'Objetivo: reescrever 3 campos (o que foi feito, por que foi feito, resultado esperado) com POUCAS PALAVRAS.',
+      'Você é um revisor de texto (pt-BR) especializado em transformar anotações em texto de RELATÓRIO curto e objetivo.',
+      'Tarefa: reescrever 3 campos (what_was_done, why_was_done, expected_results) para ficarem mais profissionais e bem resumidos.',
       'Regras obrigatórias:',
       '- Idioma: pt-BR.',
       '- Não use emojis.',
-      '- Não invente dados, números, prazos ou resultados que não existam.',
-      '- Mantenha o significado original, apenas deixe mais claro e com tom de relatório.',
-      '- Seja curto e direto (uma frase curta por campo).',
-      '- Retorne APENAS um JSON válido (sem markdown, sem texto extra) com as chaves: what_was_done, why_was_done, expected_results.',
+      '- Não invente dados (números, prazos, metas) que não estejam no texto original.',
+      '- Preserve números existentes, mas elimine redundâncias.',
+      '- Cada campo deve virar 1 frase curta, estilo relatório, com verbo no passado quando fizer sentido.',
+      '- Limite sugerido: até 110 caracteres por campo.',
+      '- Se o texto original já estiver curto, AINDA ASSIM reescreva (sinônimos, ordem, formalização) para ficar perceptivelmente diferente.',
+      '',
+      'Formato desejado (exemplos):',
+      '- what_was_done: "Ajustado raio de entrega para 3 km."',
+      '- why_was_done: "Reduzir custos e otimizar cobertura de entrega."',
+      '- expected_results: "Diminuir despesas e melhorar eficiência operacional."',
+      '',
+      'Retorne APENAS um JSON válido com as chaves: what_was_done, why_was_done, expected_results.',
     ].join('\n');
 
-    const user = JSON.stringify({ what_was_done: what, why_was_done: why, expected_results: expected });
+    const user = [
+      'Reescreva os campos abaixo conforme as regras. Retorne SOMENTE JSON.',
+      JSON.stringify({ what_was_done: what, why_was_done: why, expected_results: expected }),
+    ].join('\n');
 
     const model = (process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
 
@@ -106,6 +117,7 @@ export default async function handler(req: Request, res: Response) {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
+        response_format: { type: 'json_object' },
         temperature: 0.2,
         top_p: 0.9,
         max_tokens: 250,
@@ -128,10 +140,22 @@ export default async function handler(req: Request, res: Response) {
       improved = null;
     }
 
+    const normalize = (s: string) => String(s || '').trim().replace(/\s+/g, ' ');
+    const sameish = (a: string, b: string) => normalize(a).toLowerCase() === normalize(b).toLowerCase();
+
+    let outWhat = normalize(String(improved?.what_was_done ?? what));
+    let outWhy = normalize(String(improved?.why_was_done ?? why));
+    let outExpected = normalize(String(improved?.expected_results ?? expected));
+
+    // Fallback: se vier praticamente igual, forçar uma versão mais "relatório" sem inventar dados
+    if (sameish(outWhat, what)) outWhat = normalize(`Ajuste realizado: ${what}`);
+    if (sameish(outWhy, why)) outWhy = normalize(`Motivo: ${why}`);
+    if (sameish(outExpected, expected)) outExpected = normalize(`Objetivo: ${expected}`);
+
     const out = {
-      what_was_done: String(improved?.what_was_done ?? what).trim(),
-      why_was_done: String(improved?.why_was_done ?? why).trim(),
-      expected_results: String(improved?.expected_results ?? expected).trim(),
+      what_was_done: outWhat,
+      why_was_done: outWhy,
+      expected_results: outExpected,
       trace_id: traceId,
     };
 
