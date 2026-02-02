@@ -160,6 +160,7 @@ const payoutsUnifiedHandler = loadHandler('./ifood/financial/payouts-unified');
 const payoutsHandler = loadHandler('./ifood/financial/payouts');
 const financialBuildSummaryHandler = loadHandler('./ifood/financial/build-summary');
 const anticipationsHandler = loadHandler('./ifood/financial/anticipations');
+const financialEventsHandler = loadHandler('./ifood/financial/events');
 const reconciliationIngestHandler = loadHandler('./ifood/reconciliation/ingest');
 const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
 const reconciliationCalculateStatusHandler = loadHandler('./ifood/reconciliation/calculate-status');
@@ -498,6 +499,15 @@ if (financialBuildSummaryHandler) {
 } else {
   app.all('/api/ifood/financial/build-summary', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Financial build-summary handler not loaded' });
+  });
+}
+
+if (financialEventsHandler) {
+  app.get('/api/ifood/financial/events', adaptVercelHandler(financialEventsHandler));
+  console.log('✅ Financial events handler loaded');
+} else {
+  app.get('/api/ifood/financial/events', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Financial events handler not loaded' });
   });
 }
 
