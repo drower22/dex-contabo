@@ -161,6 +161,7 @@ const payoutsHandler = loadHandler('./ifood/financial/payouts');
 const financialBuildSummaryHandler = loadHandler('./ifood/financial/build-summary');
 const anticipationsHandler = loadHandler('./ifood/financial/anticipations');
 const financialEventsHandler = loadHandler('./ifood/financial/events');
+const financialEventsSyncHandler = loadHandler('./ifood/financial/events-sync');
 const reconciliationIngestHandler = loadHandler('./ifood/reconciliation/ingest');
 const reconciliationDebugHandler = loadHandler('./ifood/reconciliation/debug');
 const reconciliationCalculateStatusHandler = loadHandler('./ifood/reconciliation/calculate-status');
@@ -508,6 +509,15 @@ if (financialEventsHandler) {
 } else {
   app.get('/api/ifood/financial/events', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Financial events handler not loaded' });
+  });
+}
+
+if (financialEventsSyncHandler?.syncIfoodFinancialEvents) {
+  app.post('/api/ifood/financial/events/sync', financialEventsSyncHandler.syncIfoodFinancialEvents);
+  console.log('✅ Financial events sync handler loaded (direct sync)');
+} else {
+  app.post('/api/ifood/financial/events/sync', (req: Request, res: Response) => {
+    res.status(500).json({ error: 'Financial events sync handler not loaded' });
   });
 }
 
