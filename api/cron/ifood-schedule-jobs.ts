@@ -202,6 +202,7 @@ export default async function handler(req: any, res: any) {
     const runAnticipationsDaily = Boolean(globalSchedule.run_anticipations_daily);
     const runReconciliationStatus = Boolean(globalSchedule.run_reconciliation_status);
     const runReviewsSync = Boolean((globalSchedule as any).run_reviews_sync);
+    const runFinancialEventsSync = Boolean((globalSchedule as any).run_financial_events_sync);
 
     const tz = String(globalSchedule.timezone || 'America/Sao_Paulo');
     const tzOffsetMinutes = tz === 'America/Sao_Paulo' ? 180 : 180;
@@ -241,6 +242,7 @@ export default async function handler(req: any, res: any) {
         run_anticipations_daily: runAnticipationsDaily,
         run_reconciliation_status: runReconciliationStatus,
         run_reviews_sync: runReviewsSync,
+        run_financial_events_sync: runFinancialEventsSync,
       });
       return;
     }
@@ -264,6 +266,7 @@ export default async function handler(req: any, res: any) {
     let reconciliationStatusInserted = 0;
     let settlementsWeeklyInserted = 0;
     let reviewsSyncInserted = 0;
+    let financialEventsSyncInserted = 0;
 
     const total = baseAccounts.length;
 
@@ -318,6 +321,18 @@ export default async function handler(req: any, res: any) {
     const reviewsPayload = runReviewsSync
       ? baseAccounts.map((row: any, idx: number) => ({
           job_type: 'reviews_sync',
+          account_id: row.id,
+          merchant_id: row.ifood_merchant_id,
+          competence: null,
+          scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
+          job_day: jobDay,
+          status: 'pending',
+        }))
+      : [];
+
+    const financialEventsPayload = runFinancialEventsSync
+      ? baseAccounts.map((row: any, idx: number) => ({
+          job_type: 'financial_events_sync',
           account_id: row.id,
           merchant_id: row.ifood_merchant_id,
           competence: null,
@@ -496,6 +511,32 @@ export default async function handler(req: any, res: any) {
       reviewsSyncInserted = reviewsPayload.length;
     }
 
+    if (financialEventsPayload.length > 0) {
+      const { error: insertFinancialEventsError } = await supabase
+        .from('ifood_jobs')
+        .upsert(financialEventsPayload, {
+          onConflict: 'job_type,account_id,job_day',
+          ignoreDuplicates: true,
+        });
+
+      if (insertFinancialEventsError) {
+        await logError({
+          marketplace: 'ifood',
+          source: 'dex-contabo/api',
+          service: 'ifood-schedule-jobs',
+          event: 'ifood.jobs.upsert.financial_events_sync.error',
+          message: 'Failed to upsert financial_events_sync jobs',
+          trace_id: traceId,
+          err: insertFinancialEventsError,
+          data: { count: financialEventsPayload.length },
+        });
+        res.status(500).json({ error: 'Failed to upsert financial_events_sync jobs', details: insertFinancialEventsError.message });
+        return;
+      }
+
+      financialEventsSyncInserted = financialEventsPayload.length;
+    }
+
     await logEvent({
       level: 'info',
       marketplace: 'ifood',
@@ -513,6 +554,7 @@ export default async function handler(req: any, res: any) {
         inserted_reconciliation_status: reconciliationStatusInserted,
         inserted_settlements_weekly: settlementsWeeklyInserted,
         inserted_reviews_sync: reviewsSyncInserted,
+        inserted_financial_events_sync: financialEventsSyncInserted,
         window_start: windowStart,
         window_end: windowEnd,
         timezone: tz,
@@ -533,6 +575,7 @@ export default async function handler(req: any, res: any) {
       inserted_reconciliation_status: reconciliationStatusInserted,
       inserted_settlements_weekly: settlementsWeeklyInserted,
       inserted_reviews_sync: reviewsSyncInserted,
+      inserted_financial_events_sync: financialEventsSyncInserted,
       is_monday_local: isMondayLocal,
     });
   } catch (err: any) {

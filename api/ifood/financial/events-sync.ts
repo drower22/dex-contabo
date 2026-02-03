@@ -83,6 +83,17 @@ function toDateOnly(v: any): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : s.slice(0, 10);
 }
 
+function dedupeByEventKey(rows: any[]): any[] {
+  if (!Array.isArray(rows) || rows.length <= 1) return rows;
+  const map = new Map<string, any>();
+  for (const r of rows) {
+    const k = typeof r?.event_key === 'string' ? r.event_key : '';
+    if (!k) continue;
+    map.set(k, r);
+  }
+  return Array.from(map.values());
+}
+
 async function fetchFinancialEventsPage(params: {
   accessToken: string;
   merchantId: string;
@@ -202,7 +213,7 @@ export async function syncIfoodFinancialEvents(req: Request, res: Response) {
     let totalPages = 0;
     let totalEvents = 0;
 
-    const rowsToUpsert: any[] = [];
+    const rowsByEventKey = new Map<string, any>();
 
     for (;;) {
       const result = await fetchFinancialEventsPage({
@@ -265,7 +276,7 @@ export async function syncIfoodFinancialEvents(req: Request, res: Response) {
 
         const eventKey = sha256Hex(JSON.stringify(stableKey));
 
-        rowsToUpsert.push({
+        rowsByEventKey.set(eventKey, {
           event_key: eventKey,
           account_id: accountId,
           merchant_id: merchantId,
@@ -308,6 +319,8 @@ export async function syncIfoodFinancialEvents(req: Request, res: Response) {
         break;
       }
     }
+
+    const rowsToUpsert = Array.from(rowsByEventKey.values());
 
     if (rowsToUpsert.length === 0) {
       try {
@@ -359,7 +372,8 @@ export async function syncIfoodFinancialEvents(req: Request, res: Response) {
     let saved = 0;
 
     for (let i = 0; i < rowsToUpsert.length; i += batchSize) {
-      const batch = rowsToUpsert.slice(i, i + batchSize);
+      const batch = dedupeByEventKey(rowsToUpsert.slice(i, i + batchSize));
+      if (batch.length === 0) continue;
       const { error, count } = await supabase
         .from('ifood_financial_events')
         .upsert(batch, { onConflict: 'event_key', ignoreDuplicates: false, count: 'exact' });
