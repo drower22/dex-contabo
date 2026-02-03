@@ -12,7 +12,8 @@ const supabase = createClient(
 );
 
 async function resolveMerchantId(accountId: string): Promise<string | null> {
-  const { data: authStore } = await supabase
+  // 1) Preferir auth do escopo financeiro
+  const { data: authStoreFinancial } = await supabase
     .from('ifood_store_auth')
     .select('ifood_merchant_id')
     .eq('account_id', accountId)
@@ -21,8 +22,20 @@ async function resolveMerchantId(accountId: string): Promise<string | null> {
     .limit(1)
     .maybeSingle();
 
-  const fromAuth = (authStore as any)?.ifood_merchant_id;
-  if (typeof fromAuth === 'string' && fromAuth.trim()) return fromAuth.trim();
+  const fromAuthFinancial = (authStoreFinancial as any)?.ifood_merchant_id;
+  if (typeof fromAuthFinancial === 'string' && fromAuthFinancial.trim()) return fromAuthFinancial.trim();
+
+  // 2) Fallback: qualquer scope (ex: reviews) pode ter o merchant salvo
+  const { data: authStoreAny } = await supabase
+    .from('ifood_store_auth')
+    .select('ifood_merchant_id')
+    .eq('account_id', accountId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const fromAuthAny = (authStoreAny as any)?.ifood_merchant_id;
+  if (typeof fromAuthAny === 'string' && fromAuthAny.trim()) return fromAuthAny.trim();
 
   const { data: account } = await supabase
     .from('accounts')
@@ -70,6 +83,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
 
   const accountId = typeof req.query.accountId === 'string' ? req.query.accountId : '';
+  const merchantIdFromQuery = typeof req.query.merchantId === 'string' ? req.query.merchantId : '';
   const beginDate = typeof req.query.beginDate === 'string' ? req.query.beginDate : '';
   const endDate = typeof req.query.endDate === 'string' ? req.query.endDate : '';
   const page = typeof req.query.page === 'string' ? req.query.page : '1';
@@ -87,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const merchantId = await resolveMerchantId(accountId);
+    const merchantId = merchantIdFromQuery?.trim() || (await resolveMerchantId(accountId));
     if (!merchantId) {
       return res.status(404).json({ error: 'Merchant ID not found for this account' });
     }
