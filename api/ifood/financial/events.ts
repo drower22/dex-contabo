@@ -107,16 +107,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const qs = new URLSearchParams({
-      merchantId,
       beginDate,
       endDate,
       page,
       size,
     }).toString();
 
-    // Conforme a doc da API Financial Events, merchantId é parâmetro de busca (query)
-    // Endpoint esperado: GET /financial/v3/financialEvents?merchantId=...&beginDate=...&endDate=...&page=...&size=...
-    const path = `/financial/v3/financialEvents?${qs}`;
+    // Endpoint conforme reference: GET /financial/v3.0/merchants/{merchantId}/financial-events?beginDate=...&endDate=...&page=...&size=...
+    const path = `/financial/v3.0/merchants/${encodeURIComponent(merchantId)}/financial-events?${qs}`;
 
     let url: string;
     let headers: Record<string, string>;
