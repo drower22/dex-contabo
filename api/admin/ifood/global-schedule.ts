@@ -61,9 +61,12 @@ export default async function handler(req: any, res: any) {
       const runConciliation = pickBoolean(body, 'run_conciliation') ?? pickBoolean(body, 'runConciliation');
       const runSalesSync = pickBoolean(body, 'run_sales_sync') ?? pickBoolean(body, 'runSalesSync');
       const runSettlementsWeekly = pickBoolean(body, 'run_settlements_weekly') ?? pickBoolean(body, 'runSettlementsWeekly');
+      const runSettlementsDaily = pickBoolean(body, 'run_settlements_daily') ?? pickBoolean(body, 'runSettlementsDaily');
       const runAnticipationsDaily = pickBoolean(body, 'run_anticipations_daily') ?? pickBoolean(body, 'runAnticipationsDaily');
+      const runAnticipationsWeekly = pickBoolean(body, 'run_anticipations_weekly') ?? pickBoolean(body, 'runAnticipationsWeekly');
       const runReconciliationStatus = pickBoolean(body, 'run_reconciliation_status') ?? pickBoolean(body, 'runReconciliationStatus');
       const runReviewsSync = pickBoolean(body, 'run_reviews_sync') ?? pickBoolean(body, 'runReviewsSync');
+      const runFinancialEventsSync = pickBoolean(body, 'run_financial_events_sync') ?? pickBoolean(body, 'runFinancialEventsSync');
 
       const patch: any = {
         updated_at: new Date().toISOString(),
@@ -76,9 +79,12 @@ export default async function handler(req: any, res: any) {
       if (runConciliation !== null) patch.run_conciliation = runConciliation;
       if (runSalesSync !== null) patch.run_sales_sync = runSalesSync;
       if (runSettlementsWeekly !== null) patch.run_settlements_weekly = runSettlementsWeekly;
+      if (runSettlementsDaily !== null) patch.run_settlements_daily = runSettlementsDaily;
       if (runAnticipationsDaily !== null) patch.run_anticipations_daily = runAnticipationsDaily;
+      if (runAnticipationsWeekly !== null) patch.run_anticipations_weekly = runAnticipationsWeekly;
       if (runReconciliationStatus !== null) patch.run_reconciliation_status = runReconciliationStatus;
       if (runReviewsSync !== null) patch.run_reviews_sync = runReviewsSync;
+      if (runFinancialEventsSync !== null) patch.run_financial_events_sync = runFinancialEventsSync;
 
       const { data: updated, error: updErr } = await supabase
         .from('ifood_global_schedule')

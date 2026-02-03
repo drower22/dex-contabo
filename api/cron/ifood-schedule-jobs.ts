@@ -43,6 +43,12 @@ function buildUtcFromLocalDateTime(
   return new Date(localUtcMs + tzOffsetMinutes * 60_000);
 }
 
+function floorToSlot(nowUtc: Date, slotMinutes: number): string {
+  const slotMs = slotMinutes * 60_000;
+  const floored = new Date(Math.floor(nowUtc.getTime() / slotMs) * slotMs);
+  return floored.toISOString();
+}
+
 function computeScheduledFor(
   nowUtc: Date,
   windowStart: string,
@@ -199,7 +205,9 @@ export default async function handler(req: any, res: any) {
     const runConciliation = Boolean(globalSchedule.run_conciliation);
     const runSalesSync = Boolean(globalSchedule.run_sales_sync);
     const runSettlementsWeekly = Boolean(globalSchedule.run_settlements_weekly);
+    const runSettlementsDaily = Boolean((globalSchedule as any).run_settlements_daily);
     const runAnticipationsDaily = Boolean(globalSchedule.run_anticipations_daily);
+    const runAnticipationsWeekly = Boolean((globalSchedule as any).run_anticipations_weekly);
     const runReconciliationStatus = Boolean(globalSchedule.run_reconciliation_status);
     const runReviewsSync = Boolean((globalSchedule as any).run_reviews_sync);
     const runFinancialEventsSync = Boolean((globalSchedule as any).run_financial_events_sync);
@@ -260,13 +268,17 @@ export default async function handler(req: any, res: any) {
     const jobDay = now.toISOString().slice(0, 10);
     const local = asLocalDateParts(now, tzOffsetMinutes);
 
+    const jobSlot = floorToSlot(now, 30);
+
     let conciliationInserted = 0;
     let salesSyncInserted = 0;
     let anticipationsDailyInserted = 0;
     let reconciliationStatusInserted = 0;
     let settlementsWeeklyInserted = 0;
+    let settlementsDailyInserted = 0;
     let reviewsSyncInserted = 0;
     let financialEventsSyncInserted = 0;
+    let anticipationsWeeklyInserted = 0;
 
     const total = baseAccounts.length;
 
@@ -290,6 +302,7 @@ export default async function handler(req: any, res: any) {
           competence: null,
           scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
           job_day: jobDay,
+          job_slot: jobSlot,
           status: 'pending',
         }))
       : [];
@@ -297,6 +310,32 @@ export default async function handler(req: any, res: any) {
     const anticipationsPayload = runAnticipationsDaily
       ? baseAccounts.map((row: any, idx: number) => ({
           job_type: 'anticipations_daily',
+          account_id: row.id,
+          merchant_id: row.ifood_merchant_id,
+          competence: null,
+          scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
+          job_day: jobDay,
+          status: 'pending',
+        }))
+      : [];
+
+    const isMondayLocal = local.dow === 1;
+
+    const settlementsDailyPayload = runSettlementsDaily
+      ? baseAccounts.map((row: any, idx: number) => ({
+          job_type: 'settlements_daily',
+          account_id: row.id,
+          merchant_id: row.ifood_merchant_id,
+          competence: null,
+          scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
+          job_day: jobDay,
+          status: 'pending',
+        }))
+      : [];
+
+    const anticipationsWeeklyPayload = runAnticipationsWeekly && isMondayLocal
+      ? baseAccounts.map((row: any, idx: number) => ({
+          job_type: 'anticipations_weekly',
           account_id: row.id,
           merchant_id: row.ifood_merchant_id,
           competence: null,
@@ -326,6 +365,7 @@ export default async function handler(req: any, res: any) {
           competence: null,
           scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
           job_day: jobDay,
+          job_slot: jobSlot,
           status: 'pending',
         }))
       : [];
@@ -338,11 +378,11 @@ export default async function handler(req: any, res: any) {
           competence: null,
           scheduled_for: computeScheduledFor(now, windowStart, windowEnd, idx, total, tzOffsetMinutes),
           job_day: jobDay,
+          job_slot: jobSlot,
           status: 'pending',
         }))
       : [];
 
-    const isMondayLocal = local.dow === 1;
     const settlementsPayload = runSettlementsWeekly && isMondayLocal
       ? baseAccounts.map((row: any, idx: number) => ({
           job_type: 'settlements_weekly',
@@ -385,7 +425,7 @@ export default async function handler(req: any, res: any) {
       const { error: insertSalesError } = await supabase
         .from('ifood_jobs')
         .upsert(salesSyncPayload, {
-          onConflict: 'job_type,account_id,job_day',
+          onConflict: 'job_type,account_id,job_slot',
           ignoreDuplicates: true,
         });
 
@@ -431,6 +471,58 @@ export default async function handler(req: any, res: any) {
       }
 
       anticipationsDailyInserted = anticipationsPayload.length;
+    }
+
+    if (settlementsDailyPayload.length > 0) {
+      const { error: insertSettlementsDailyError } = await supabase
+        .from('ifood_jobs')
+        .upsert(settlementsDailyPayload, {
+          onConflict: 'job_type,account_id,job_day',
+          ignoreDuplicates: true,
+        });
+
+      if (insertSettlementsDailyError) {
+        await logError({
+          marketplace: 'ifood',
+          source: 'dex-contabo/api',
+          service: 'ifood-schedule-jobs',
+          event: 'ifood.jobs.upsert.settlements_daily.error',
+          message: 'Failed to upsert settlements_daily jobs',
+          trace_id: traceId,
+          err: insertSettlementsDailyError,
+          data: { count: settlementsDailyPayload.length },
+        });
+        res.status(500).json({ error: 'Failed to upsert settlements_daily jobs', details: insertSettlementsDailyError.message });
+        return;
+      }
+
+      settlementsDailyInserted = settlementsDailyPayload.length;
+    }
+
+    if (anticipationsWeeklyPayload.length > 0) {
+      const { error: insertAnticipationsWeeklyError } = await supabase
+        .from('ifood_jobs')
+        .upsert(anticipationsWeeklyPayload, {
+          onConflict: 'job_type,account_id,job_day',
+          ignoreDuplicates: true,
+        });
+
+      if (insertAnticipationsWeeklyError) {
+        await logError({
+          marketplace: 'ifood',
+          source: 'dex-contabo/api',
+          service: 'ifood-schedule-jobs',
+          event: 'ifood.jobs.upsert.anticipations_weekly.error',
+          message: 'Failed to upsert anticipations_weekly jobs',
+          trace_id: traceId,
+          err: insertAnticipationsWeeklyError,
+          data: { count: anticipationsWeeklyPayload.length },
+        });
+        res.status(500).json({ error: 'Failed to upsert anticipations_weekly jobs', details: insertAnticipationsWeeklyError.message });
+        return;
+      }
+
+      anticipationsWeeklyInserted = anticipationsWeeklyPayload.length;
     }
 
     if (settlementsPayload.length > 0) {
@@ -489,7 +581,7 @@ export default async function handler(req: any, res: any) {
       const { error: insertReviewsError } = await supabase
         .from('ifood_jobs')
         .upsert(reviewsPayload, {
-          onConflict: 'job_type,account_id,job_day',
+          onConflict: 'job_type,account_id,job_slot',
           ignoreDuplicates: true,
         });
 
@@ -515,7 +607,7 @@ export default async function handler(req: any, res: any) {
       const { error: insertFinancialEventsError } = await supabase
         .from('ifood_jobs')
         .upsert(financialEventsPayload, {
-          onConflict: 'job_type,account_id,job_day',
+          onConflict: 'job_type,account_id,job_slot',
           ignoreDuplicates: true,
         });
 

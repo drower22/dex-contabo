@@ -111,6 +111,15 @@ function computePreviousWeekRangeFromJobDay(jobDay: string): { beginPaymentDate:
   return { beginPaymentDate, endPaymentDate };
 }
 
+function computeLastDaysRange(days: number): { beginPaymentDate: string; endPaymentDate: string } {
+  const endDate = new Date();
+  const beginDate = new Date(endDate);
+  beginDate.setDate(endDate.getDate() - days + 1);
+  const beginPaymentDate = beginDate.toISOString().split('T')[0];
+  const endPaymentDate = endDate.toISOString().split('T')[0];
+  return { beginPaymentDate, endPaymentDate };
+}
+
 async function reserveJobs(limit: number): Promise<IfoodJob[]> {
   if (!supabase) return [];
 
@@ -119,7 +128,7 @@ async function reserveJobs(limit: number): Promise<IfoodJob[]> {
   const { data: candidates, error } = await supabase
     .from('ifood_jobs')
     .select('*')
-    .eq('job_type', 'settlements_weekly')
+    .in('job_type', ['settlements_weekly', 'settlements_daily'])
     .eq('status', 'pending')
     .lte('scheduled_for', nowIso)
     .or(`next_retry_at.is.null,next_retry_at.lte.${nowIso}`)
@@ -364,6 +373,116 @@ async function processSettlementsWeeklyJob(job: IfoodJob) {
   }
 }
 
+async function processSettlementsDailyJob(job: IfoodJob) {
+  if (!job.account_id || !job.merchant_id) {
+    await markJobRetry(job, 'Dados incompletos no job (account_id/merchant_id ausentes).');
+    await logEvent({
+      level: 'warn',
+      ...jobLogContext(job),
+      event: 'ifood.job.invalid',
+      message: 'Dados incompletos no job (account_id/merchant_id ausentes)',
+    });
+    return;
+  }
+
+  const range = computeLastDaysRange(7); // últimos 7 dias incremental
+
+  const url = `${DEX_API_BASE_URL}/api/ifood/settlements`;
+  const body = {
+    storeId: job.account_id,
+    merchantId: job.merchant_id,
+    ingest: true,
+    triggerSource: 'settlements_daily_job',
+    beginPaymentDate: range.beginPaymentDate,
+    endPaymentDate: range.endPaymentDate,
+  };
+
+  try {
+    await logEvent({
+      level: 'info',
+      ...jobLogContext(job),
+      event: 'ifood.settlements.daily.request',
+      message: 'Disparando ingest de settlements diários (últimos 7 dias)',
+      data: { url, beginPaymentDate: range.beginPaymentDate, endPaymentDate: range.endPaymentDate },
+    });
+
+    const response = await ifoodRateLimiter.execute(() =>
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+    );
+
+    const text = await response.text();
+    let parsed: any = null;
+    if (text) {
+      try {
+        parsed = JSON.parse(text);
+      } catch (err: any) {
+        await logError({
+          ...jobLogContext(job),
+          event: 'ifood.settlements.daily.response_parse.error',
+          message: 'Falha ao parsear resposta JSON do endpoint de settlements',
+          err,
+        });
+      }
+    }
+
+    if (response.ok && parsed && parsed.success) {
+      await markJobSuccess(job);
+      await logEvent({
+        level: 'info',
+        ...jobLogContext(job),
+        event: 'ifood.settlements.daily.success',
+        message: 'Job de settlements diários concluído com sucesso',
+        data: {
+          processedItems: parsed?.processedItems ?? null,
+          dbSavedItems: parsed?.dbSavedItems ?? null,
+          http_status: response.status,
+        },
+      });
+      return;
+    }
+
+    const errorMessage = `HTTP ${response.status}: ${text.slice(0, 500)}`;
+
+    if (response.status >= 400 && response.status < 500) {
+      await logEvent({
+        level: 'warn',
+        ...jobLogContext(job),
+        event: 'ifood.settlements.daily.http_error',
+        message: 'Erro não-retryable no ingest de settlements (4xx)',
+        data: { http_status: response.status, response_preview: text.slice(0, 200) },
+      });
+      job.attempts = (job.attempts || 0) + 1;
+      job.next_retry_at = null;
+      await markJobRetry(job, errorMessage);
+      return;
+    }
+
+    await logEvent({
+      level: 'warn',
+      ...jobLogContext(job),
+      event: 'ifood.settlements.daily.http_error',
+      message: 'Erro retryable no ingest de settlements (5xx)',
+      data: { http_status: response.status },
+    });
+    await markJobRetry(job, errorMessage);
+  } catch (err: any) {
+    const message = err?.message || String(err);
+    await logError({
+      ...jobLogContext(job),
+      event: 'ifood.settlements.daily.exception',
+      message: 'Exceção ao processar job de settlements diários',
+      err,
+    });
+    await markJobRetry(job, message);
+  }
+}
+
 async function tick() {
   if (!supabase) {
     await logEvent({
@@ -385,18 +504,17 @@ async function tick() {
     return;
   }
 
-  await logEvent({
-    level: 'info',
-    marketplace: 'ifood',
-    source: 'dex-contabo/worker',
-    service: 'ifood-settlements-worker',
-    event: 'worker.batch.start',
-    message: 'Processando lote de jobs',
-    trace_id: WORKER_ID,
-    data: { count: jobs.length },
-  });
+  await Promise.all(jobs.map((job) => processJob(job)));
+}
 
-  await Promise.all(jobs.map((job) => processSettlementsWeeklyJob(job)));
+async function processJob(job: IfoodJob) {
+  if (job.job_type === 'settlements_daily') {
+    await processSettlementsDailyJob(job);
+  } else if (job.job_type === 'settlements_weekly') {
+    await processSettlementsWeeklyJob(job);
+  } else {
+    await markJobRetry(job, `job_type não suportado: ${job.job_type}`);
+  }
 }
 
 async function main() {
