@@ -644,9 +644,11 @@ export default async function handler(req: any, res: any) {
         inserted_sales_sync: salesSyncInserted,
         inserted_anticipations_daily: anticipationsDailyInserted,
         inserted_reconciliation_status: reconciliationStatusInserted,
+        inserted_settlements_daily: settlementsDailyInserted,
         inserted_settlements_weekly: settlementsWeeklyInserted,
         inserted_reviews_sync: reviewsSyncInserted,
         inserted_financial_events_sync: financialEventsSyncInserted,
+        inserted_anticipations_weekly: anticipationsWeeklyInserted,
         window_start: windowStart,
         window_end: windowEnd,
         timezone: tz,
@@ -665,9 +667,11 @@ export default async function handler(req: any, res: any) {
       inserted_sales_sync: salesSyncInserted,
       inserted_anticipations_daily: anticipationsDailyInserted,
       inserted_reconciliation_status: reconciliationStatusInserted,
+      inserted_settlements_daily: settlementsDailyInserted,
       inserted_settlements_weekly: settlementsWeeklyInserted,
       inserted_reviews_sync: reviewsSyncInserted,
       inserted_financial_events_sync: financialEventsSyncInserted,
+      inserted_anticipations_weekly: anticipationsWeeklyInserted,
       is_monday_local: isMondayLocal,
     });
   } catch (err: any) {
