@@ -83,6 +83,44 @@ function toDateOnly(v: any): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : s.slice(0, 10);
 }
 
+function parseDateOnly(dateStr: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  const [y, m, d] = dateStr.split('-').map((x) => Number(x));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function formatDateOnlyUTC(dt: Date): string {
+  const y = dt.getUTCFullYear();
+  const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(dt.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function addDaysUTC(dt: Date, days: number): Date {
+  return new Date(dt.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function splitIntoChunks(params: { beginDate: string; endDate: string; maxDaysPerChunk: number }): Array<{ beginDate: string; endDate: string }> {
+  const begin = parseDateOnly(params.beginDate);
+  const end = parseDateOnly(params.endDate);
+  if (!begin || !end) return [];
+
+  const chunks: Array<{ beginDate: string; endDate: string }> = [];
+  let cursor = begin;
+
+  while (cursor.getTime() <= end.getTime()) {
+    const chunkEnd = addDaysUTC(cursor, params.maxDaysPerChunk - 1);
+    const effectiveEnd = chunkEnd.getTime() <= end.getTime() ? chunkEnd : end;
+    chunks.push({ beginDate: formatDateOnlyUTC(cursor), endDate: formatDateOnlyUTC(effectiveEnd) });
+    cursor = addDaysUTC(effectiveEnd, 1);
+    if (chunks.length >= 5000) break;
+  }
+
+  return chunks;
+}
+
 function dedupeByEventKey(rows: any[]): any[] {
   if (!Array.isArray(rows) || rows.length <= 1) return rows;
   const map = new Map<string, any>();
@@ -173,6 +211,16 @@ export async function syncIfoodFinancialEvents(req: Request, res: Response) {
       return res.status(400).json({ error: 'Parâmetros obrigatórios: beginDate e endDate (YYYY-MM-DD)' });
     }
 
+    const beginDt = parseDateOnly(beginDate);
+    const endDt = parseDateOnly(endDate);
+    if (!beginDt || !endDt) {
+      return res.status(400).json({ error: 'Formato inválido. Use beginDate/endDate em YYYY-MM-DD' });
+    }
+
+    if (beginDt.getTime() > endDt.getTime()) {
+      return res.status(400).json({ error: 'Período inválido: beginDate não pode ser maior que endDate' });
+    }
+
     const normalizedMode = syncMode === 'backfill' || syncMode === 'incremental' ? syncMode : 'backfill';
 
     const accessToken = await resolveAccessToken(accountId);
@@ -209,120 +257,156 @@ export async function syncIfoodFinancialEvents(req: Request, res: Response) {
     }
 
     const size = 100;
-    let page = 1;
     let totalPages = 0;
     let totalEvents = 0;
+    let saved = 0;
 
-    const rowsByEventKey = new Map<string, any>();
+    const maxDaysPerChunk = 30;
+    const chunks = splitIntoChunks({ beginDate, endDate, maxDaysPerChunk });
+    const effectiveChunks = chunks.length > 0 ? chunks : [{ beginDate, endDate }];
 
-    for (;;) {
-      const result = await fetchFinancialEventsPage({
-        accessToken,
-        merchantId,
-        beginDate,
-        endDate,
-        page,
-        size,
-      });
+    const shouldDelete = normalizedMode === 'backfill';
+    const batchSize = 500;
 
-      if (!result.ok) {
-        const errorMessage = `HTTP ${result.status}: ${String(result.bodyText || '').slice(0, 500)}`;
-        try {
-          await supabase
-            .from('ifood_financial_events_sync_status')
-            .update({
-              status: 'failed',
-              completed_at: new Date().toISOString(),
-              last_error: errorMessage,
-              total_events: totalEvents,
-              total_pages: totalPages,
-            })
-            .eq('account_id', accountId)
-            .eq('merchant_id', merchantId)
-            .eq('period_start', beginDate)
-            .eq('period_end', endDate);
-        } catch {
+    for (const chunk of effectiveChunks) {
+      let page = 1;
+      const rowsByEventKey = new Map<string, any>();
+
+      for (;;) {
+        const result = await fetchFinancialEventsPage({
+          accessToken,
+          merchantId,
+          beginDate: chunk.beginDate,
+          endDate: chunk.endDate,
+          page,
+          size,
+        });
+
+        if (!result.ok) {
+          const errorMessage = `HTTP ${result.status}: ${String(result.bodyText || '').slice(0, 500)}`;
+          try {
+            await supabase
+              .from('ifood_financial_events_sync_status')
+              .update({
+                status: 'failed',
+                completed_at: new Date().toISOString(),
+                last_error: errorMessage,
+                total_events: totalEvents,
+                total_pages: totalPages,
+              })
+              .eq('account_id', accountId)
+              .eq('merchant_id', merchantId)
+              .eq('period_start', beginDate)
+              .eq('period_end', endDate);
+          } catch {
+          }
+
+          return res.status(result.status >= 400 && result.status < 600 ? result.status : 500).json({
+            error: 'iFood API error',
+            status: result.status,
+            body: result.json ?? result.bodyText,
+          });
         }
 
-        return res.status(result.status >= 400 && result.status < 600 ? result.status : 500).json({
-          error: 'iFood API error',
-          status: result.status,
-          body: result.json ?? result.bodyText,
-        });
+        totalPages += 1;
+
+        const payload = result.json || {};
+        const events = Array.isArray(payload.financialEvents) ? payload.financialEvents : [];
+
+        for (const ev of events) {
+          const stableKey = {
+            merchantId,
+            competence: ev?.competence ?? null,
+            period: ev?.period ?? null,
+            reference: ev?.reference ?? null,
+            name: ev?.name ?? null,
+            description: ev?.description ?? null,
+            product: ev?.product ?? null,
+            trigger: ev?.trigger ?? null,
+            hasTransferImpact: ev?.hasTransferImpact ?? null,
+            amount: ev?.amount ?? null,
+            billing: ev?.billing ?? null,
+            settlement: ev?.settlement ?? null,
+            receiver: ev?.receiver ?? null,
+            payment: ev?.payment ?? null,
+          };
+
+          const eventKey = sha256Hex(JSON.stringify(stableKey));
+
+          rowsByEventKey.set(eventKey, {
+            event_key: eventKey,
+            account_id: accountId,
+            merchant_id: merchantId,
+            competence: typeof ev?.competence === 'string' ? ev.competence : null,
+            period_begin_date: toDateOnly(ev?.period?.beginDate),
+            period_end_date: toDateOnly(ev?.period?.endDate),
+            balance_id: typeof ev?.period?.idSaldo === 'string' ? ev.period.idSaldo : null,
+            reference_type: typeof ev?.reference?.type === 'string' ? ev.reference.type : null,
+            reference_id: typeof ev?.reference?.id === 'string' ? ev.reference.id : null,
+            reference_date: typeof ev?.reference?.date === 'string' ? ev.reference.date : null,
+            name: typeof ev?.name === 'string' ? ev.name : null,
+            description: typeof ev?.description === 'string' ? ev.description : null,
+            product: typeof ev?.product === 'string' ? ev.product : null,
+            trigger: typeof ev?.trigger === 'string' ? ev.trigger : null,
+            has_transfer_impact: typeof ev?.hasTransferImpact === 'boolean' ? ev.hasTransferImpact : null,
+            amount_value: toNumberSafe(ev?.amount?.value),
+            billing_base_value: toNumberSafe(ev?.billing?.baseValue),
+            fee_percentage: toNumberSafe(ev?.billing?.feePercentage),
+            expected_settlement_date: toDateOnly(ev?.settlement?.expectedDate),
+            receiver_merchant_id: typeof ev?.receiver?.merchantId === 'string' ? ev.receiver.merchantId : null,
+            receiver_merchant_document: typeof ev?.receiver?.merchantDocument === 'string' ? ev.receiver.merchantDocument : null,
+            payment_method: typeof ev?.payment?.method === 'string' ? ev.payment.method : null,
+            payment_brand: typeof ev?.payment?.brand === 'string' ? ev.payment.brand : null,
+            payment_liability: typeof ev?.payment?.liability === 'string' ? ev.payment.liability : null,
+            raw: ev,
+            synced_at: new Date().toISOString(),
+          });
+        }
+
+        totalEvents += events.length;
+
+        const hasNextPage = Boolean(payload.hasNextPage);
+        if (!hasNextPage) break;
+
+        page += 1;
+        if (page >= 2000) break;
       }
 
-      totalPages += 1;
-
-      const payload = result.json || {};
-      const events = Array.isArray(payload.financialEvents) ? payload.financialEvents : [];
-
-      for (const ev of events) {
-        const stableKey = {
-          merchantId,
-          competence: ev?.competence ?? null,
-          period: ev?.period ?? null,
-          reference: ev?.reference ?? null,
-          name: ev?.name ?? null,
-          description: ev?.description ?? null,
-          product: ev?.product ?? null,
-          trigger: ev?.trigger ?? null,
-          hasTransferImpact: ev?.hasTransferImpact ?? null,
-          amount: ev?.amount ?? null,
-          billing: ev?.billing ?? null,
-          settlement: ev?.settlement ?? null,
-          receiver: ev?.receiver ?? null,
-          payment: ev?.payment ?? null,
-        };
-
-        const eventKey = sha256Hex(JSON.stringify(stableKey));
-
-        rowsByEventKey.set(eventKey, {
-          event_key: eventKey,
-          account_id: accountId,
-          merchant_id: merchantId,
-          competence: typeof ev?.competence === 'string' ? ev.competence : null,
-          period_begin_date: toDateOnly(ev?.period?.beginDate),
-          period_end_date: toDateOnly(ev?.period?.endDate),
-          balance_id: typeof ev?.period?.idSaldo === 'string' ? ev.period.idSaldo : null,
-          reference_type: typeof ev?.reference?.type === 'string' ? ev.reference.type : null,
-          reference_id: typeof ev?.reference?.id === 'string' ? ev.reference.id : null,
-          reference_date: typeof ev?.reference?.date === 'string' ? ev.reference.date : null,
-          name: typeof ev?.name === 'string' ? ev.name : null,
-          description: typeof ev?.description === 'string' ? ev.description : null,
-          product: typeof ev?.product === 'string' ? ev.product : null,
-          trigger: typeof ev?.trigger === 'string' ? ev.trigger : null,
-          has_transfer_impact: typeof ev?.hasTransferImpact === 'boolean' ? ev.hasTransferImpact : null,
-          amount_value: toNumberSafe(ev?.amount?.value),
-          billing_base_value: toNumberSafe(ev?.billing?.baseValue),
-          fee_percentage: toNumberSafe(ev?.billing?.feePercentage),
-          expected_settlement_date: toDateOnly(ev?.settlement?.expectedDate),
-          receiver_merchant_id: typeof ev?.receiver?.merchantId === 'string' ? ev.receiver.merchantId : null,
-          receiver_merchant_document: typeof ev?.receiver?.merchantDocument === 'string' ? ev.receiver.merchantDocument : null,
-          payment_method: typeof ev?.payment?.method === 'string' ? ev.payment.method : null,
-          payment_brand: typeof ev?.payment?.brand === 'string' ? ev.payment.brand : null,
-          payment_liability: typeof ev?.payment?.liability === 'string' ? ev.payment.liability : null,
-          raw: ev,
-          synced_at: new Date().toISOString(),
-        });
+      const rowsToUpsert = Array.from(rowsByEventKey.values());
+      if (rowsToUpsert.length === 0) {
+        continue;
       }
 
-      totalEvents += events.length;
+      if (shouldDelete) {
+        const { error: deleteError } = await supabase
+          .from('ifood_financial_events')
+          .delete()
+          .eq('account_id', accountId)
+          .eq('merchant_id', merchantId)
+          .gte('period_begin_date', chunk.beginDate)
+          .lte('period_end_date', chunk.endDate);
 
-      const hasNextPage = Boolean(payload.hasNextPage);
-
-      if (!hasNextPage) {
-        break;
+        if (deleteError) {
+          throw new Error(`Erro ao limpar eventos existentes no período: ${deleteError.message}`);
+        }
       }
 
-      page += 1;
-      if (page >= 2000) {
-        break;
+      for (let i = 0; i < rowsToUpsert.length; i += batchSize) {
+        const batch = dedupeByEventKey(rowsToUpsert.slice(i, i + batchSize));
+        if (batch.length === 0) continue;
+        const { error, count } = await supabase
+          .from('ifood_financial_events')
+          .upsert(batch, { onConflict: 'event_key', ignoreDuplicates: false, count: 'exact' });
+
+        if (error) {
+          throw new Error(`Erro ao salvar eventos no banco: ${error.message}`);
+        }
+
+        saved += count ?? batch.length;
       }
     }
 
-    const rowsToUpsert = Array.from(rowsByEventKey.values());
-
-    if (rowsToUpsert.length === 0) {
+    if (saved === 0) {
       try {
         await supabase
           .from('ifood_financial_events_sync_status')
@@ -350,39 +434,6 @@ export async function syncIfoodFinancialEvents(req: Request, res: Response) {
           endDate,
         },
       });
-    }
-
-    const shouldDelete = normalizedMode === 'backfill';
-
-    if (shouldDelete) {
-      const { error: deleteError } = await supabase
-        .from('ifood_financial_events')
-        .delete()
-        .eq('account_id', accountId)
-        .eq('merchant_id', merchantId)
-        .gte('period_begin_date', beginDate)
-        .lte('period_end_date', endDate);
-
-      if (deleteError) {
-        throw new Error(`Erro ao limpar eventos existentes no período: ${deleteError.message}`);
-      }
-    }
-
-    const batchSize = 500;
-    let saved = 0;
-
-    for (let i = 0; i < rowsToUpsert.length; i += batchSize) {
-      const batch = dedupeByEventKey(rowsToUpsert.slice(i, i + batchSize));
-      if (batch.length === 0) continue;
-      const { error, count } = await supabase
-        .from('ifood_financial_events')
-        .upsert(batch, { onConflict: 'event_key', ignoreDuplicates: false, count: 'exact' });
-
-      if (error) {
-        throw new Error(`Erro ao salvar eventos no banco: ${error.message}`);
-      }
-
-      saved += count ?? batch.length;
     }
 
     try {
