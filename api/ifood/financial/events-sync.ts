@@ -109,7 +109,7 @@ async function fetchFinancialEventsPage(params: {
     size: String(params.size),
   }).toString();
 
-  const path = `/financial/v3.0/merchants/${encodeURIComponent(params.merchantId)}/financial-events?${qs}`;
+  const path = `/financial/v3.0/merchants/${params.merchantId}/financial-events?${qs}`;
 
   let url: string;
   let headers: Record<string, string>;
