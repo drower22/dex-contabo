@@ -109,45 +109,57 @@ async function fetchSalesPage(
   console.log(`📄 [syncIfoodSales] URL completa:`, url);
   console.log(`📄 [syncIfoodSales] Path iFood:`, path);
 
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'x-shared-key': IFOOD_PROXY_KEY!,
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json'
-    }
-  });
+  const maxAttempts = 3;
+  let lastErr: any = null;
 
-  console.log(`📥 [syncIfoodSales] Response status:`, response.status, response.statusText);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'x-shared-key': IFOOD_PROXY_KEY!,
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+        },
+      });
 
-  if (!response.ok) {
-    const errorText = await response.text();
+      console.log(`📥 [syncIfoodSales] Response status:`, response.status, response.statusText);
 
-    // Alguns tenants retornam 400 quando a página solicitada excede pageCount.
-    // Tratar como fim da paginação para não quebrar o sync.
-    if (response.status === 400 && errorText.toLowerCase().includes('invalid page')) {
-      // Alguns tenants rejeitam page=0 (exigem > 0). Nesse caso, é erro de configuração,
-      // não "fim" de paginação.
-      if (page <= 1) {
-        console.error(`❌ [syncIfoodSales] Invalid page (cannot continue) page ${page}:`, errorText);
-        throw new Error(`Invalid page (${page}) returned by iFood API`);
+      if (!response.ok) {
+        const errorText = await response.text();
+
+        // 5xx/transientes: retry
+        if (response.status >= 500 && attempt < maxAttempts) {
+          console.warn(`⚠️ [syncIfoodSales] Erro ${response.status} ao buscar vendas (tentativa ${attempt}/${maxAttempts}). Retentando...`);
+          await new Promise((r) => setTimeout(r, 1000 * attempt));
+          continue;
+        }
+
+        // Alguns tenants retornam 400 quando a página solicitada excede pageCount.
+        // Tratar como fim da paginação para não quebrar o sync.
+        if (response.status === 400 && errorText.toLowerCase().includes('invalid page')) {
+          // Alguns tenants rejeitam page=0 (exigem > 0). Nesse caso, é erro de configuração,
+          // não "fim" de paginação.
+          if (page <= 1) {
+            console.error(`❌ [syncIfoodSales] Invalid page (cannot continue) page ${page}:`, errorText);
+            throw new Error(`Invalid page (${page}) returned by iFood API`);
+          }
+
+          console.warn(`⚠️ [syncIfoodSales] Invalid page (treat as end) page ${page}:`, errorText);
+          return { sales: [], hasMore: false };
+        }
+
+        // Caso comum de loja sem vendas no período: tratar como 0 vendas em vez de erro
+        if (response.status === 404 && errorText.includes('No sales found between')) {
+          console.warn(`⚠️ [syncIfoodSales] Nenhuma venda encontrada no período para a página ${page}:`, errorText);
+          return { sales: [], hasMore: false };
+        }
+
+        console.error(`❌ [syncIfoodSales] Erro na página ${page}:`, errorText);
+        throw new Error(`Erro ao buscar vendas: ${response.status}`);
       }
 
-      console.warn(`⚠️ [syncIfoodSales] Invalid page (treat as end) page ${page}:`, errorText);
-      return { sales: [], hasMore: false };
-    }
-
-    // Caso comum de loja sem vendas no período: tratar como 0 vendas em vez de erro
-    if (response.status === 404 && errorText.includes('No sales found between')) {
-      console.warn(`⚠️ [syncIfoodSales] Nenhuma venda encontrada no período para a página ${page}:`, errorText);
-      return { sales: [], hasMore: false };
-    }
-
-    console.error(`❌ [syncIfoodSales] Erro na página ${page}:`, errorText);
-    throw new Error(`Erro ao buscar vendas: ${response.status}`);
-  }
-
-  const data: any = await response.json();
+      const data: any = await response.json();
   console.log(`📊 [syncIfoodSales] Dados recebidos:`, {
     page: data.page,
     size: data.size,
@@ -177,8 +189,20 @@ async function fetchSalesPage(
         ? page < pageCountRaw
         : sales.length > 0 && sales.length === DEFAULT_PAGE_SIZE;
 
-  console.log(`✅ [syncIfoodSales] Página ${page}: ${sales.length} vendas | hasMore: ${hasMore}`);
-  return { sales, hasMore };
+      console.log(`✅ [syncIfoodSales] Página ${page}: ${sales.length} vendas | hasMore: ${hasMore}`);
+      return { sales, hasMore };
+    } catch (err: any) {
+      lastErr = err;
+      const msg = err?.message || String(err);
+      if (attempt < maxAttempts) {
+        console.warn(`⚠️ [syncIfoodSales] Erro de rede ao buscar vendas (tentativa ${attempt}/${maxAttempts}): ${msg}. Retentando...`);
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+        continue;
+      }
+    }
+  }
+
+  throw lastErr ?? new Error('Erro ao buscar vendas (sem detalhes)');
 }
 
 /**
@@ -326,6 +350,7 @@ export async function syncIfoodSales(req: Request, res: Response) {
         syncMode,
         syncType,
         mode,
+        async: asyncRaw,
       } = req.body;
 
       const accountId = String(accountIdRaw || storeId || '').trim();
@@ -343,6 +368,8 @@ export async function syncIfoodSales(req: Request, res: Response) {
         requestedMode === 'backfill' || requestedMode === 'incremental' ? requestedMode : 'incremental';
 
       const hasExplicitPeriod = Boolean(periodStartRaw && periodEndRaw);
+
+      const runAsync = Boolean(asyncRaw);
 
       const computedRange =
         normalizedMode === 'incremental' && !hasExplicitPeriod
@@ -410,63 +437,63 @@ export async function syncIfoodSales(req: Request, res: Response) {
       }
 
       // 1. Obter token
-      const token = await getIfoodToken(accountId);
+      const runSync = async () => {
+        // 1. Obter token
+        const token = await getIfoodToken(accountId);
 
-      // 2. Dividir período em chunks de 7 dias (limite da API iFood)
-      const startDate = new Date(periodStart);
-      const endDate = new Date(periodEnd);
-      const chunks: Array<{ start: string; end: string }> = [];
+        // 2. Dividir período em chunks de 7 dias (limite da API iFood)
+        const startDate = new Date(periodStart);
+        const endDate = new Date(periodEnd);
+        const chunks: Array<{ start: string; end: string }> = [];
       
-      let currentStart = new Date(startDate);
-      while (currentStart <= endDate) {
-        const currentEnd = new Date(currentStart);
-        currentEnd.setDate(currentEnd.getDate() + 6); // 7 dias (incluindo o dia inicial)
+        let currentStart = new Date(startDate);
+        while (currentStart <= endDate) {
+          const currentEnd = new Date(currentStart);
+          currentEnd.setDate(currentEnd.getDate() + 6); // 7 dias (incluindo o dia inicial)
         
-        if (currentEnd > endDate) {
-          currentEnd.setTime(endDate.getTime());
+          if (currentEnd > endDate) {
+            currentEnd.setTime(endDate.getTime());
+          }
+        
+          chunks.push({
+            start: currentStart.toISOString().split('T')[0],
+            end: currentEnd.toISOString().split('T')[0],
+          });
+        
+          currentStart.setDate(currentStart.getDate() + 7);
         }
+
+        console.log(`📅 [API] Período dividido em ${chunks.length} chunks de 7 dias:`, chunks);
+
+        // 3. Buscar vendas de cada chunk
+        let allSales: any[] = [];
+        let totalPages = 0;
+
+        for (const chunk of chunks) {
+          console.log(`📦 [API] Processando chunk: ${chunk.start} a ${chunk.end}`);
         
-        chunks.push({
-          start: currentStart.toISOString().split('T')[0],
-          end: currentEnd.toISOString().split('T')[0]
-        });
-        
-        currentStart.setDate(currentStart.getDate() + 7);
-      }
+          // Alguns tenants do iFood exigem page > 0.
+          let page = 1;
+          let hasMore = true;
 
-      console.log(`📅 [API] Período dividido em ${chunks.length} chunks de 7 dias:`, chunks);
+          while (hasMore) {
+            const { sales, hasMore: more } = await fetchSalesPage(token, merchantId, chunk.start, chunk.end, page);
+            allSales.push(...sales);
+            hasMore = more;
+            page += 1;
+            totalPages++;
 
-      // 3. Buscar vendas de cada chunk
-      let allSales: any[] = [];
-      let totalPages = 0;
-
-      for (const chunk of chunks) {
-        console.log(`📦 [API] Processando chunk: ${chunk.start} a ${chunk.end}`);
-        
-        // Alguns tenants do iFood exigem page > 0.
-        let page = 1;
-        let hasMore = true;
-
-        while (hasMore) {
-          const { sales, hasMore: more } = await fetchSalesPage(
-            token, merchantId, chunk.start, chunk.end, page
-          );
-          allSales.push(...sales);
-          hasMore = more;
-          page += 1;
-          totalPages++;
-
-          // Limite de segurança (max 100 páginas por chunk)
-          if (page >= 100) {
-            console.warn(`⚠️ [syncIfoodSales] Limite de 100 páginas atingido no chunk ${chunk.start}-${chunk.end}`);
-            break;
+            // Limite de segurança (max 100 páginas por chunk)
+            if (page >= 100) {
+              console.warn(`⚠️ [syncIfoodSales] Limite de 100 páginas atingido no chunk ${chunk.start}-${chunk.end}`);
+              break;
+            }
           }
         }
-      }
 
-      // Se não conseguimos buscar nada, não podemos apagar dados existentes.
-      // (Evita "zerar" vendas por erro de paginação/token/integração.)
-      if (allSales.length === 0) {
+        // Se não conseguimos buscar nada, não podemos apagar dados existentes.
+        // (Evita "zerar" vendas por erro de paginação/token/integração.)
+        if (allSales.length === 0) {
         console.warn('⚠️ [syncIfoodSales] Nenhuma venda retornada pela API. Pulando limpeza e upsert para evitar apagar dados existentes.', {
           accountId,
           merchantId,
@@ -506,21 +533,24 @@ export async function syncIfoodSales(req: Request, res: Response) {
           });
         }
 
-        return res.status(200).json({
-          success: true,
-          message: 'Sincronização concluída (nenhuma venda retornada pela API)',
-          data: {
-            salesSynced: 0,
-            totalPages,
-            totalChunks: chunks.length,
-            periodStart,
-            periodEnd,
-          },
-        });
-      }
+          return {
+            statusCode: 200,
+            payload: {
+              success: true,
+              message: 'Sincronização concluída (nenhuma venda retornada pela API)',
+              data: {
+                salesSynced: 0,
+                totalPages,
+                totalChunks: chunks.length,
+                periodStart,
+                periodEnd,
+              },
+            },
+          };
+        }
 
-      const shouldDelete = normalizedMode === 'backfill' || hasExplicitPeriod;
-      if (shouldDelete) {
+        const shouldDelete = normalizedMode === 'backfill' || hasExplicitPeriod;
+        if (shouldDelete) {
         // 4. Limpar vendas existentes no período antes de salvar novas (somente para backfill/manual)
         console.log('🧹 [syncIfoodSales] Limpando vendas existentes no período antes de salvar novas...', {
           accountId,
@@ -551,8 +581,8 @@ export async function syncIfoodSales(req: Request, res: Response) {
         });
       }
 
-      // 5. Salvar no banco
-      const savedCount = await saveSales(allSales, accountId, merchantId);
+        // 5. Salvar no banco
+        const savedCount = await saveSales(allSales, accountId, merchantId);
 
       try {
         const { error: statusUpdateError } = await supabase
@@ -584,19 +614,60 @@ export async function syncIfoodSales(req: Request, res: Response) {
         });
       }
 
-      console.log(`✅ [API] Sync concluído: ${savedCount} vendas sincronizadas em ${chunks.length} chunks`);
+        console.log(`✅ [API] Sync concluído: ${savedCount} vendas sincronizadas em ${chunks.length} chunks`);
 
-      return res.status(200).json({
-        success: true,
-        message: 'Sincronização concluída',
-        data: {
-          salesSynced: savedCount,
-          totalPages,
-          totalChunks: chunks.length,
-          periodStart,
-          periodEnd,
-        },
-      });
+        return {
+          statusCode: 200,
+          payload: {
+            success: true,
+            message: 'Sincronização concluída',
+            data: {
+              salesSynced: savedCount,
+              totalPages,
+              totalChunks: chunks.length,
+              periodStart,
+              periodEnd,
+            },
+          },
+        };
+      };
+
+      if (runAsync) {
+        setImmediate(() => {
+          void (async () => {
+            try {
+              await runSync();
+            } catch (err: any) {
+              const message = err?.message || String(err);
+              console.error('❌ [API] Erro no sync (async):', message);
+              try {
+                await supabase
+                  .from('ifood_sales_sync_status')
+                  .update({
+                    status: 'failed',
+                    completed_at: new Date().toISOString(),
+                    last_error: message.slice(0, 500),
+                  })
+                  .eq('account_id', accountId)
+                  .eq('merchant_id', merchantId)
+                  .eq('period_start', periodStart)
+                  .eq('period_end', periodEnd);
+              } catch {
+                // ignore
+              }
+            }
+          })();
+        });
+
+        return res.status(202).json({
+          success: true,
+          message: 'Sincronização iniciada (assíncrona). Acompanhe pelos logs/ifood_sales_sync_status.',
+          data: { periodStart, periodEnd },
+        });
+      }
+
+      const result = await runSync();
+      return res.status(result.statusCode).json(result.payload);
 
     } catch (error: any) {
       console.error('❌ [API] Erro no sync:', error);
