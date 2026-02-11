@@ -358,7 +358,6 @@ export async function syncIfoodFinancialEvents(req: Request, res: Response) {
             payment_method: typeof ev?.payment?.method === 'string' ? ev.payment.method : null,
             payment_brand: typeof ev?.payment?.brand === 'string' ? ev.payment.brand : null,
             payment_liability: typeof ev?.payment?.liability === 'string' ? ev.payment.liability : null,
-            raw: ev,
             synced_at: new Date().toISOString(),
           });
         }
