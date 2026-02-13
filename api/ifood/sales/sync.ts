@@ -117,8 +117,13 @@ async function fetchSalesPage(
   endDate: string,
   page: number
 ): Promise<{ sales: any[]; hasMore: boolean }> {
-  const DEFAULT_PAGE_SIZE = 20;
-  const path = `/financial/v3.0/merchants/${merchantId}/sales?beginSalesDate=${beginDate}&endSalesDate=${endDate}&page=${page}`;
+  const PAGE_SIZE = Math.max(1, Math.min(200, Number(process.env.IFOOD_SALES_PAGE_SIZE || 200)));
+  const path =
+    `/financial/v3.0/merchants/${merchantId}/sales` +
+    `?beginSalesDate=${beginDate}` +
+    `&endSalesDate=${endDate}` +
+    `&page=${page}` +
+    `&size=${PAGE_SIZE}`;
   const url = `${IFOOD_PROXY_BASE}?path=${encodeURIComponent(path)}`;
 
   console.log(`📄 [syncIfoodSales] Buscando página ${page}...`);
@@ -214,7 +219,7 @@ async function fetchSalesPage(
       ? data.hasMore
       : typeof pageCountRaw === 'number'
         ? page < pageCountRaw
-        : sales.length > 0 && sales.length === DEFAULT_PAGE_SIZE;
+        : sales.length > 0 && sales.length === PAGE_SIZE;
 
       console.log(`✅ [syncIfoodSales] Página ${page}: ${sales.length} vendas | hasMore: ${hasMore}`);
       await sleep(150);
