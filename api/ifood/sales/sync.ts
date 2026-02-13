@@ -91,6 +91,22 @@ async function getIfoodToken(accountId: string): Promise<string> {
   return data.access_token;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const asSeconds = Number(value);
+  if (Number.isFinite(asSeconds) && asSeconds > 0) return Math.round(asSeconds * 1000);
+  const asDate = Date.parse(value);
+  if (!Number.isNaN(asDate)) {
+    const ms = asDate - Date.now();
+    return ms > 0 ? ms : 0;
+  }
+  return null;
+}
+
 /**
  * Buscar vendas de uma página
  */
@@ -128,10 +144,21 @@ async function fetchSalesPage(
       if (!response.ok) {
         const errorText = await response.text();
 
+        if (response.status === 429 && attempt < maxAttempts) {
+          const retryAfterHeader = response.headers.get('retry-after');
+          const retryAfterMs = parseRetryAfterMs(retryAfterHeader);
+          const waitMs = retryAfterMs ?? 1500 * attempt;
+          console.warn(
+            `⚠️ [syncIfoodSales] Erro 429 ao buscar vendas (tentativa ${attempt}/${maxAttempts}). Aguardando ${waitMs}ms e retentando...`,
+          );
+          await sleep(waitMs);
+          continue;
+        }
+
         // 5xx/transientes: retry
         if (response.status >= 500 && attempt < maxAttempts) {
           console.warn(`⚠️ [syncIfoodSales] Erro ${response.status} ao buscar vendas (tentativa ${attempt}/${maxAttempts}). Retentando...`);
-          await new Promise((r) => setTimeout(r, 1000 * attempt));
+          await sleep(1000 * attempt);
           continue;
         }
 
@@ -190,13 +217,14 @@ async function fetchSalesPage(
         : sales.length > 0 && sales.length === DEFAULT_PAGE_SIZE;
 
       console.log(`✅ [syncIfoodSales] Página ${page}: ${sales.length} vendas | hasMore: ${hasMore}`);
+      await sleep(150);
       return { sales, hasMore };
     } catch (err: any) {
       lastErr = err;
       const msg = err?.message || String(err);
       if (attempt < maxAttempts) {
         console.warn(`⚠️ [syncIfoodSales] Erro de rede ao buscar vendas (tentativa ${attempt}/${maxAttempts}): ${msg}. Retentando...`);
-        await new Promise((r) => setTimeout(r, 1000 * attempt));
+        await sleep(1000 * attempt);
         continue;
       }
     }
