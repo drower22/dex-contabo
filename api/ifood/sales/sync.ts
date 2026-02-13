@@ -511,6 +511,7 @@ export async function syncIfoodSales(req: Request, res: Response) {
               completed_at: new Date().toISOString(),
               total_sales: 0,
               total_pages: totalPages,
+              total_fetched: 0,
               last_error: null,
             })
             .eq('account_id', accountId)
@@ -592,6 +593,7 @@ export async function syncIfoodSales(req: Request, res: Response) {
             completed_at: new Date().toISOString(),
             total_sales: savedCount,
             total_pages: totalPages,
+            total_fetched: allSales.length,
             last_error: null,
           })
           .eq('account_id', accountId)
